@@ -1,6 +1,8 @@
 """Main entry point for pykanban."""
 
+import shutil
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -14,6 +16,9 @@ from pykanban.config import (
 from pykanban.core.store import AppState
 from pykanban.ui.main_window import MainWindow
 from pykanban.ui.settings_dialog import SettingsDialog
+
+# Bundled template lives next to this file inside the `data` directory
+_DATA_DIR = Path(__file__).parent / "data"
 
 
 def ensure_config_dir() -> None:
@@ -47,11 +52,40 @@ def bootstrap_settings() -> Settings:
     return settings
 
 
+def seed_template(settings: Settings) -> None:
+    """Copy the bundled template to the projects directory.
+
+    Runs only when projects_dir contains no project folders yet, so
+    it never overwrites existing projects.
+    """
+    projects_dir = settings.projects_dir
+    projects_dir.mkdir(parents=True, exist_ok=True)
+
+    # skip if the user already has at least one project
+    has_projects = any(
+        (d / "metadata.yml").exists()
+        for d in projects_dir.iterdir()
+        if d.is_dir()
+    )
+    if has_projects:
+        return
+
+    template_src = _DATA_DIR / "learn-pykanban"
+    # template not bundled - skip silently, don't crash
+    if not template_src.exists():
+        return
+
+    destination = projects_dir / "learn-pykanban"
+    if not destination.exists():
+        shutil.copytree(template_src, destination)
+
+
 def main() -> int:
     """Main entry point for pykanban."""
     app = QApplication(sys.argv)
     settings = bootstrap_settings()
-    app_state = AppState(settings)
+    seed_template(settings)
+    app_state = AppState.create(settings)
     window = MainWindow(app_state)
     window.show()
 

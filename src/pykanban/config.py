@@ -61,3 +61,6 @@ def save_settings(settings: Settings) -> None:
 
     with CONFIG_FILE.open("w") as f:
         yaml.dump({"projects_dir": str(settings.projects_dir.resolve())}, f)
+
+    # create the projects directory if it doesn't exist
+    settings.projects_dir.mkdir(parents=True, exist_ok=True)

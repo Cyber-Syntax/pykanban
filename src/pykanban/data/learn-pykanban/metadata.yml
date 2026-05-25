@@ -1,0 +1,13 @@
+project_id: p_a1b2c3d4
+schema: 1
+title: learn pykanban
+description: Learn PyKanban
+created: "2026-05-25T20:40:00"
+updated: "2026-05-25T20:40:00"
+archived: false
+column_order:
+    backlog: []
+    todo:
+        - a3f9c1b2
+    doing: []
+    done: []
