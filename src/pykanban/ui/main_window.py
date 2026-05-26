@@ -6,7 +6,13 @@ Uses PySide6 for UI rendering.
 from __future__ import annotations
 
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QInputDialog,
+    QMainWindow,
+    QVBoxLayout,
+    QWidget,
+)
 
 from pykanban.core.store import AppState
 from pykanban.ui.error_banner import ErrorBanner
@@ -69,11 +75,15 @@ class MainWindow(QMainWindow):
 
         self.editor.task_saved.connect(self._refresh_from_state)
         self.sidebar.project_selected.connect(self._switch_project)
-        self.sidebar.new_project_requested.connect(self._create_project)  # was unwired
+        self.sidebar.new_project_requested.connect(
+            self._create_project
+        )  # was unwired
 
     def _initial_load(self) -> None:
         self.app_state.startup_scan(self.app_state.settings.projects_dir)
-        self.sidebar.refresh(list(self.app_state.projects.projects_by_id.values()))
+        self.sidebar.refresh(
+            list(self.app_state.projects.projects_by_id.values())
+        )
         self._refresh_from_state()
 
     def _open_task(self, task_id: str) -> None:
@@ -94,20 +104,37 @@ class MainWindow(QMainWindow):
         self.error_banner.set_errors(self.app_state.errors)
 
     def _switch_project(self, project_id: str) -> None:
+        # clear any open task in the editor
+        # so it doesn't show stale data when switching projects
+        self.editor.clear()
+
+        # switch to the new project and refresh the board
         board = self.app_state.switch_project(project_id)
         self._refresh_board(board)
 
     def _create_project(self) -> None:
         """Handle the 'New project' button from the sidebar."""
-        from PySide6.QtWidgets import QInputDialog
 
         title, ok = QInputDialog.getText(self, "New Project", "Project title:")
         if not ok or not title.strip():
             return
 
-        desc, _ = QInputDialog.getText(self, "New Project", "Description (optional):")
+        desc, _ = QInputDialog.getText(
+            self, "New Project", "Description (optional):"
+        )
 
+        # create the project
         project = self.app_state.create_project(title.strip(), desc.strip())
-        self.app_state.projects.set_active(project.project_id)
-        self.sidebar.refresh(list(self.app_state.projects.projects_by_id.values()))
+
+        # clear the editor and switch to the new project
+        self.editor.clear()
+
+        # switch to the new project and refresh the board
+        board = self.app_state.switch_project(project.project_id)
+        self._refresh_board(board)
+
+        # refresh the sidebar to show the new project
+        self.sidebar.refresh(
+            list(self.app_state.projects.projects_by_id.values())
+        )
         self._refresh_from_state()

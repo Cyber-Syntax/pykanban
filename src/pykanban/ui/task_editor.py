@@ -79,6 +79,16 @@ class TaskEditorPanel(QWidget):
         self._flush_changes()
         super().closeEvent(event)
 
+    def clear(self) -> None:
+        """Stop the debounce timer, flush any pending edit, then hide."""
+        self._timer.stop()
+        # writes while task still exists in store
+        self._flush_changes()
+        # clear task reference to avoid writing to stale task
+        self._task = None
+        # make sure editor is hidden after clearing
+        self.setVisible(False)
+
     def _build_form(self) -> None:
         """Build the editor form layout."""
         self._populate_combo(self.status_combo, list(Status))
