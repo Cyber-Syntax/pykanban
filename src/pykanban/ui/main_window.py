@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QVBoxLayout,
     QWidget,
+    QMessageBox,
 )
 
 from pykanban.core.store import AppState
@@ -71,13 +72,12 @@ class MainWindow(QMainWindow):
     def _wire_signals(self) -> None:
         for column in self.board.columns.values():
             column.task_selected.connect(self._open_task)
+            column.task_deleted.connect(self._delete_task)
             column.board_changed.connect(self._refresh_board)
 
         self.editor.task_saved.connect(self._refresh_from_state)
         self.sidebar.project_selected.connect(self._switch_project)
-        self.sidebar.new_project_requested.connect(
-            self._create_project
-        )  # was unwired
+        self.sidebar.new_project_requested.connect(self._create_project)
 
     def _initial_load(self) -> None:
         self.app_state.startup_scan(self.app_state.settings.projects_dir)
@@ -89,6 +89,37 @@ class MainWindow(QMainWindow):
     def _open_task(self, task_id: str) -> None:
         task = self.app_state.tasks.get(task_id)
         self.editor.load_task(task)
+
+    def _delete_task(self, task_id: str) -> None:
+        """Confirm and delete the task, then refresh the board.
+
+        Shows a confirmation dialog before deleting the task. If the deleted
+        task is currently open in the editor, the editor is cleared first
+        so it doesn't hold a stale reference to the deleted task.
+
+        Args:
+            task_id: The ID of the task to delete.
+        """
+        task = self.app_state.tasks.get(task_id)
+        if task is None:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to delete the task '{task.title}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.No:
+            return
+
+        # clear the editor if it is showing the task being deleted
+        if self.editor._task and self.editor._task.id == task_id:
+            self.editor.clear()
+
+        self.app_state.delete_task(task_id)
+        self._refresh_from_state()
 
     def _refresh_from_state(self) -> None:
         """Refresh board from AppState — no-op when no project is active yet."""

@@ -27,10 +27,12 @@ class KanbanColumn(QWidget):
 
     Signals:
         task_selected: Emitted with the task_id when a card is clicked.
+        task_deleted: Emitted with the task_id when a card is deleted.
         board_changed: Emitted with the updated BoardView after a drop.
     """
 
     task_selected = Signal(str)
+    task_deleted = Signal(str)
     board_changed = Signal(BoardView)
 
     def __init__(
@@ -214,6 +216,9 @@ class KanbanColumn(QWidget):
 
         Also updates the header count and the "show more" button
         visibility (done column only).
+
+        Each card's delete_requested signal is forwarded as task_deleted
+        so MainWindow can handle deletion without knowing about columns.
         """
         # Remove every widget currently in the card layout
         while self.cards_layout.count():
@@ -233,6 +238,8 @@ class KanbanColumn(QWidget):
 
             card = TaskCard(task)
             card.clicked.connect(self.task_selected.emit)
+            # forward delete requestes upward to MainWindow
+            card.delete_requested.connect(self.task_deleted.emit)
             self.cards_layout.addWidget(card)
 
         self.cards_layout.addStretch(1)

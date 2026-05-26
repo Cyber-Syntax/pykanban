@@ -8,11 +8,12 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import QMimeData, QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QDrag, QMouseEvent
+from PySide6.QtGui import QContextMenuEvent, QDrag, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +28,8 @@ class TaskCard(QWidget):
     """Compact card widget for a task."""
 
     clicked = Signal(str)
+    # emits task_id
+    delete_requested = Signal(str)
 
     def __init__(self, task: Task, parent: QWidget | None = None) -> None:
         """Initialize the task card.
@@ -41,6 +44,8 @@ class TaskCard(QWidget):
         self._dragging = False
         self.setObjectName("TaskCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # enable right-click context menu via contextMenuEvent
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
 
         title = QLabel(task.title)
         title.setWordWrap(True)
@@ -58,6 +63,18 @@ class TaskCard(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(header)
         layout.addWidget(title)
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        """Handle right-click context menu event.
+
+        Args:
+            event: The context menu event.
+        """
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete")
+        action = menu.exec(event.globalPos())
+        if action == delete_action:
+            self.delete_requested.emit(self.task.id)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Handle mouse press to store position for drag detection.
