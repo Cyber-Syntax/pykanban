@@ -5,7 +5,6 @@ Uses PySide6 for UI rendering.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -17,14 +16,6 @@ class ErrorLike(Protocol):
 
     path: Path
     reason: str
-
-
-@dataclass(frozen=True)
-class ConflictWarning:
-    """Represents a detected sync-conflict file."""
-
-    path: Path
-    reason: str = "Sync conflict detected"
 
 
 class ErrorBanner(QWidget):
