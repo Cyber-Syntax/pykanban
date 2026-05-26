@@ -10,9 +10,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QMainWindow,
+    QMessageBox,
     QVBoxLayout,
     QWidget,
-    QMessageBox,
 )
 
 from pykanban.core.store import AppState
@@ -78,6 +78,8 @@ class MainWindow(QMainWindow):
         self.editor.task_saved.connect(self._refresh_from_state)
         self.sidebar.project_selected.connect(self._switch_project)
         self.sidebar.new_project_requested.connect(self._create_project)
+        self.sidebar.project_delete_requested.connect(self._delete_project)
+        self.sidebar.project_archive_requested.connect(self._archive_project)
 
     def _initial_load(self) -> None:
         self.app_state.startup_scan(self.app_state.settings.projects_dir)
@@ -133,6 +135,77 @@ class MainWindow(QMainWindow):
     def _refresh_board(self, board) -> None:
         self.board.refresh(board)
         self.error_banner.set_errors(self.app_state.errors)
+
+    def _delete_project(self, project_id: str) -> None:
+        """Confirm and permanently delete a project, then refresh the UI.
+
+        Clears the editor and board first so neither holds a reference to
+        tasks that are about to be removed from memory and disk.
+
+        Args:
+            project_id: ID of the project to delete.
+        """
+        project = self.app_state.projects.projects_by_id.get(project_id)
+        if project is None:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Delete project",
+            f'Delete "{project.title}" and all its tasks?\n'
+            "This connot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # clear editor and board before mutating state
+        self.editor.clear()
+        self.app_state.delete_project(project_id)
+
+        # refresh sidebar; board will show empty state if no project remains
+        self.sidebar.refresh(
+            list(self.app_state.projects.projects_by_id.values())
+        )
+        self._refresh_from_state()
+
+    def _archive_project(self, project_id: str) -> None:
+        """Confirm and move a project to archive, then refresh the UI.
+
+        Tasks are dropped from memory after archiving (handled by
+        AppState.archive_project) while the project metadata stays in the
+        store so the sidebar can still display the title under archived.
+
+        Args:
+            project_id: ID of the project to delete.
+        """
+        project = self.app_state.projects.projects_by_id.get(project_id)
+        if project is None:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Archive project",
+            f'Archive "{project.title}" and all its tasks?\n'
+            "This can be undone later.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Clear editor and board before mutating state
+        self.editor.clear()
+        self.app_state.archive_project(project_id)
+
+        # Sidebar refresh moves the item from active -> archived section
+        self.sidebar.refresh(
+            list(self.app_state.projects.projects_by_id.values())
+        )
+
+        # boards shows empty state since active_project_id is now None
+        self._refresh_from_state()
 
     def _switch_project(self, project_id: str) -> None:
         # clear any open task in the editor

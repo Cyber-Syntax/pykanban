@@ -103,7 +103,15 @@ class AppState:
         )
 
     def startup_scan(self, projects_dir: Path) -> None:
-        """Scan all project folders on startup and populate stores."""
+        """Scan all project folders on startup and populate stores.
+
+        Active projects have their tasks loaded into memory.
+        Archived projects have only their metadata loaded, tsks are left
+        off-memory intentionally to keep startup fast.
+
+        Args:
+            projects_dir: project directory
+        """
         self.tasks = TaskStore()
         self.projects = ProjectStore()
         self.errors = []
@@ -113,27 +121,42 @@ class AppState:
         if not projects_dir.exists():
             return
 
+        # collect all folders to scan: top-level projecst + archive sub folder.
+        # using a helper keeps the loading logic in one place.
+        archive_root = projects_dir / "archive"
+        folders_to_scan: list[Path] = []
+
         for folder in projects_dir.iterdir():
-            if not folder.is_dir():
+            # skip the archive root itself, its children are handled below
+            if folder == archive_root:
                 continue
 
-            metadata_path = folder / "metadata.yml"
-            if not metadata_path.exists():
-                continue
+            if folder.is_dir() and (folder / "metadata.yml").exists():
+                folders_to_scan.append(folder)
 
-            project = Project.from_file(metadata_path)
+        if archive_root.is_dir():
+            for folder in archive_root.iterdir():
+                if folder.is_dir() and (folder / "metadata.yml").exists():
+                    folders_to_scan.append(folder)
+
+
+        for folder in folders_to_scan:
+            project = Project.from_file(folder / "metadata.yml")
             if isinstance(project, ParseError):
                 self.errors.append(project)
                 continue
-
             self.projects.put(project)
+
 
         active = self._choose_active_project()
         if active is None:
             return
 
-        # Load tasks for all projects and reconcile each project's order separately
+        # load tasks only for non-archived projects to keep memory lean
         for project in self.projects.projects_by_id.values():
+            if project.archived:
+                continue
+
             # Collect task IDs for this project only
             project_task_ids = self._load_project_tasks(project)
             # Create a temporary task store with just this project's tasks for reconciliation
@@ -359,8 +382,46 @@ class AppState:
 
         return project
 
+    def delete_project(self, project_id: str) -> None:
+        """Permanently delete a project folder and remove it from the store.
+
+        If the deleted project was the active one, the active project is
+        reset to None so the board renders and empty state rather than crashing
+        on the next get_board() call.
+
+        Args:
+            project_id: Project ID to delete.
+        """
+        project = self.projects.projects_by_id[project_id]
+
+        try:
+            shutil.rmtree(str(project.folder_path))
+        except OSError as e:
+            self.errors.append(
+                ParseError(path=project.folder_path, reason=str(e))
+            )
+            return
+
+        # drop the project and all its tasks from memory
+        del self.projects.projects_by_id[project_id]
+        for task_id in list(self.tasks.tasks_by_id):
+            if task_id in (
+                project.column_order.get(s, []) for s in project.column_order
+            ):
+                self.tasks.remove(task_id)
+
+        # clear active project if it was the one just deleted
+        if self.projects.active_project_id == project_id:
+            self.projects.active_project_id = None
+            self.tasks = TaskStore()
+
     def archive_project(self, project_id: str) -> None:
         """Archive a project by moving it to archive/.
+
+        The Project object stays in projects_by_id (so the sidebar can
+        still show the title under Archived), but if this was the active
+        projects its tasks are dropped from memory to avoid holding onto
+        data that is no longer needed.
 
         Args:
             project_id: Project ID to archive.
@@ -386,6 +447,13 @@ class AppState:
             project.write()
         except WriteError as e:
             self.errors.append(ParseError(path=e.path, reason=e.reason))
+
+        # free task memory when the archived project was the active one.
+        # the projecto object is intentionally kept in projects_by_id
+        # so the side bar can still render its title in the archived section
+        if self.projects.active_project_id == project_id:
+            self.projects.active_project_id = None
+            self.tasks = TaskStore()
 
     def unarchive_project(self, project_id: str) -> None:
         """Unarchive a project by moving it back to projects root.

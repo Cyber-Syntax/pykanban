@@ -5,11 +5,12 @@ Uses PySide6 for UI rendering.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QGroupBox,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -24,6 +25,8 @@ class ProjectSidebar(QWidget):
 
     project_selected = Signal(str)
     new_project_requested = Signal()
+    project_delete_requested = Signal(str)
+    project_archive_requested = Signal(str)
 
     def __init__(
         self, app_state: AppState, parent: QWidget | None = None
@@ -52,8 +55,22 @@ class ProjectSidebar(QWidget):
         layout.addWidget(self.archived_box)
         layout.addWidget(self.new_button)
 
+        # enable custom context menus on both lists
+        self.active_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.archived_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+
         self.active_list.itemClicked.connect(self._on_item_clicked)
         self.archived_list.itemClicked.connect(self._on_item_clicked)
+        self.active_list.customContextMenuRequested.connect(
+            lambda pos: self._on_context_menu(pos, self.active_list)
+        )
+        self.archived_list.customContextMenuRequested.connect(
+            lambda pos: self._on_context_menu(pos, self.archived_list)
+        )
         self.new_button.clicked.connect(self.new_project_requested)
 
     def refresh(self, projects: list[Project]) -> None:
@@ -82,3 +99,28 @@ class ProjectSidebar(QWidget):
         """
         project_id = item.data(0x0100)
         self.project_selected.emit(project_id)
+
+    def _on_context_menu(self, pos: QPoint, list_widget: QListWidget) -> None:
+        """Show a right-click context menu on a hovered project item.
+
+        Args:
+            pos: Position of the context menu request.
+            list_widget: List widget that triggered the context menu.
+        """
+        item = list_widget.itemAt(pos)
+        # right-click on empty space; ignore
+        if item is None:
+            return
+
+        project_id = item.data(0x0100)
+
+        menu = QMenu(self)
+
+        archive_action = menu.addAction("Archive project")
+        delete_action = menu.addAction("Delete project")
+
+        action = menu.exec(list_widget.mapToGlobal(pos))
+        if action == delete_action:
+            self.project_delete_requested.emit(project_id)
+        elif action == archive_action:
+            self.project_archive_requested.emit(project_id)
