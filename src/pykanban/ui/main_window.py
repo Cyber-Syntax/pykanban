@@ -80,6 +80,9 @@ class MainWindow(QMainWindow):
         self.sidebar.new_project_requested.connect(self._create_project)
         self.sidebar.project_delete_requested.connect(self._delete_project)
         self.sidebar.project_archive_requested.connect(self._archive_project)
+        self.sidebar.project_unarchive_requested.connect(
+            self._unarchive_project
+        )
 
     def _initial_load(self) -> None:
         self.app_state.startup_scan(self.app_state.settings.projects_dir)
@@ -205,6 +208,14 @@ class MainWindow(QMainWindow):
         )
 
         # boards shows empty state since active_project_id is now None
+        self._refresh_from_state()
+
+    def _unarchive_project(self, project_id: str) -> None:
+        """Unarchive the project and refresh the UI."""
+        self.app_state.unarchive_project(project_id)
+        self.sidebar.refresh(
+            list(self.app_state.projects.projects_by_id.values())
+        )
         self._refresh_from_state()
 
     def _switch_project(self, project_id: str) -> None:

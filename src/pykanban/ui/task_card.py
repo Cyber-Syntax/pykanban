@@ -71,7 +71,7 @@ class TaskCard(QWidget):
             event: The context menu event.
         """
         menu = QMenu(self)
-        delete_action = menu.addAction("Delete")
+        delete_action = menu.addAction("Delete task")
         action = menu.exec(event.globalPos())
         if action == delete_action:
             self.delete_requested.emit(self.task.id)

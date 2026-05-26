@@ -462,17 +462,19 @@ class AppState:
             project_id: Project ID to unarchive.
         """
         project = self.projects.projects_by_id[project_id]
-        target = self.settings.projects_dir / project.folder_path.name
+        archived_projects = self.settings.projects_dir / "archive"
+        archived_folder_path = archived_projects / project.folder_path.name
+        project_folder_path = self.settings.projects_dir / project.folder_path.name
 
         try:
-            shutil.move(str(project.folder_path), str(target))
+            shutil.move(str(archived_folder_path), str(project_folder_path))
         except OSError as e:
             self.errors.append(
                 ParseError(path=project.folder_path, reason=str(e))
             )
             return
 
-        project.folder_path = target
+        project.folder_path = project_folder_path
         project.archived = False
         project.updated = datetime.now()
 

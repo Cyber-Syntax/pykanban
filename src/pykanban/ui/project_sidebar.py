@@ -27,6 +27,7 @@ class ProjectSidebar(QWidget):
     new_project_requested = Signal()
     project_delete_requested = Signal(str)
     project_archive_requested = Signal(str)
+    project_unarchive_requested = Signal(str)
 
     def __init__(
         self, app_state: AppState, parent: QWidget | None = None
@@ -114,13 +115,25 @@ class ProjectSidebar(QWidget):
 
         project_id = item.data(0x0100)
 
-        menu = QMenu(self)
+        # get project and check if archived
+        project = self.app_state.projects.projects_by_id[project_id]
+        is_archived = project.archived
 
-        archive_action = menu.addAction("Archive project")
+        menu = QMenu(self)
         delete_action = menu.addAction("Delete project")
+
+        archive_action = None
+        unarchive_action = None
+
+        if is_archived:
+            unarchive_action = menu.addAction("Unarchive project")
+        else:
+            archive_action = menu.addAction("Archive project")
 
         action = menu.exec(list_widget.mapToGlobal(pos))
         if action == delete_action:
             self.project_delete_requested.emit(project_id)
         elif action == archive_action:
             self.project_archive_requested.emit(project_id)
+        elif action == unarchive_action:
+            self.project_unarchive_requested.emit(project_id)
