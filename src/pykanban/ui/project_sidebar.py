@@ -41,8 +41,6 @@ class ProjectSidebar(QWidget):
         self.archived_list = QListWidget()
 
         self.archived_box = QGroupBox("Archived")
-        self.archived_box.setCheckable(True)
-        self.archived_box.setChecked(False)
 
         archived_layout = QVBoxLayout(self.archived_box)
         archived_layout.addWidget(self.archived_list)

@@ -21,7 +21,12 @@ from pykanban.core.store import AppState, BoardView
 
 
 class KanbanColumn(QWidget):
-    """Column widget for a given task status."""
+    """A single Kanban Column (Backlog / Todo / Doing / Done).
+
+    Signals:
+        task_selected: Emitted with the task_id when a card is clicked.
+        board_changed: Emitted with the updated BoardView after a drop.
+    """
 
     task_selected = Signal(str)
     board_changed = Signal(BoardView)

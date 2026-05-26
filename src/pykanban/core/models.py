@@ -146,7 +146,18 @@ class Task:
         )
 
     def write(self, path: Path) -> None:
-        """Write the task to a file."""
+        """Write the task to a Markdown file with YAML fornt matter.
+
+        Updates "self.updated" to the current time before serializing
+        so the on-disk timestamp always reflects the last actual save.
+
+        Args:
+            path: Destination file path (created or overwritten atomically)
+
+        Raises:
+            WriteError: Propagated from atomic_write on any OS-level failure.
+        """
+        self.updated = datetime.now()
 
         # create the YAML front matter
         data = {
@@ -240,7 +251,14 @@ class Project:
         )
 
     def write(self) -> None:
-        """Write the project metadata to a metadata.yml file in the project folder."""
+        """Write the project metadata to a metadata.yml file in the project folder.
+
+        Updates "self.updated" to the current time before serializing.
+
+        Raises:
+            WriteError: Propagated from atomic_write on any OS-level self.failure.
+        """
+        self.updated = datetime.now()
 
         data = {
             "project_id": self.project_id,
