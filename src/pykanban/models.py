@@ -13,12 +13,12 @@ from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
-from pykanban.repository import file_io
+from pykanban import file_handler
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pykanban.core.store import TaskStore
+    from pykanban.store import TaskStore
 
 # ruamel.yaml is used to preserve the order of fields in the YAML front matter
 # ruamel.yaml use typ="safe" default when not specified
@@ -198,7 +198,7 @@ class Task:
         frontmatter = stream.getvalue().strip()
 
         content = f"---\n{frontmatter}\n---\n{self.raw_body}"
-        file_io.atomic_write(path, content)
+        file_handler.atomic_write(path, content)
 
 
 @dataclass
@@ -303,7 +303,7 @@ class Project:
         content = stream.getvalue().strip()
 
         metadata_path = self.folder_path / "metadata.yml"
-        file_io.atomic_write(metadata_path, content)
+        file_handler.atomic_write(metadata_path, content)
 
     def reconcile_order(
         self, known_ids: set[str], task_store: TaskStore

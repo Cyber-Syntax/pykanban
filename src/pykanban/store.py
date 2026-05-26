@@ -7,12 +7,12 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from pykanban.config import Settings
-from pykanban.core import board_logic
-from pykanban.core.models import ParseError, Priority, Project, Status, Task
-from pykanban.repository import scanner
-from pykanban.repository.file_io import WriteError
+from pykanban import board_logic
+from pykanban.models import ParseError, Priority, Project, Status, Task
+from pykanban.file_handler import WriteError
 
 
 @dataclass
@@ -139,14 +139,12 @@ class AppState:
                 if folder.is_dir() and (folder / "metadata.yml").exists():
                     folders_to_scan.append(folder)
 
-
         for folder in folders_to_scan:
             project = Project.from_file(folder / "metadata.yml")
             if isinstance(project, ParseError):
                 self.errors.append(project)
                 continue
             self.projects.put(project)
-
 
         active = self._choose_active_project()
         if active is None:
@@ -188,7 +186,6 @@ class AppState:
         Returns:
             The created task.
         """
-        from pykanban.core.id_gen import generate_task_id
 
         project = self.projects.get_active()
         task_id = generate_task_id(self.tasks)
@@ -354,7 +351,6 @@ class AppState:
         Returns:
             The created project.
         """
-        from pykanban.core.id_gen import generate_project_id
 
         project_id = generate_project_id(self.projects)
         folder = self.settings.projects_dir / self._slugify(title)
@@ -464,7 +460,9 @@ class AppState:
         project = self.projects.projects_by_id[project_id]
         archived_projects = self.settings.projects_dir / "archive"
         archived_folder_path = archived_projects / project.folder_path.name
-        project_folder_path = self.settings.projects_dir / project.folder_path.name
+        project_folder_path = (
+            self.settings.projects_dir / project.folder_path.name
+        )
 
         try:
             shutil.move(str(archived_folder_path), str(project_folder_path))
@@ -497,7 +495,7 @@ class AppState:
         self.tasks = TaskStore()
         self.scan_mtime_cache = {}
 
-        scan = scanner.scan_project_folder(
+        scan = scan_project_folder(
             project.folder_path, self.scan_mtime_cache
         )
         self.scan_mtime_cache = scan.mtime_cache
@@ -645,3 +643,66 @@ class AppState:
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
         slug = slug.strip("-")
         return slug or "project"
+
+
+@dataclass
+class ScanResult:
+    """Result of scanning a project folder."""
+
+    changed_paths: list[Path]
+    deleted_paths: list[Path]
+    conflict_paths: list[Path]
+    mtime_cache: dict[Path, float]
+
+
+def scan_project_folder(
+    project_folder: Path, mtime_cache: dict[Path, float]
+) -> ScanResult:
+    """Scan a project folder and detect changes."""
+    previous = mtime_cache or {}
+    current: dict[Path, float] = {}
+    changed: list[Path] = []
+
+    for path in project_folder.rglob("*.md"):
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        current[path] = mtime
+        if previous.get(path) != mtime:
+            changed.append(path)
+
+    deleted = [path for path in previous if path not in current]
+    conflict = list(project_folder.rglob(".sync-conflict-*"))
+
+    return ScanResult(
+        changed_paths=changed,
+        deleted_paths=deleted,
+        conflict_paths=conflict,
+        mtime_cache=current,
+    )
+
+
+# TODO: make them pure function?
+def generate_task_id(store: TaskStore) -> str:
+    """Generate a unique task ID."""
+    for _ in range(10):
+        candidate = uuid4().hex[:8]
+        if candidate not in store.tasks_by_id:
+            return candidate
+
+    raise RuntimeError(
+        "Failed to generate a unique task ID after 10 attempts."
+    )
+
+
+def generate_project_id(store: ProjectStore) -> str:
+    """Generate a unique project ID."""
+    for _ in range(10):
+        candidate = f"p_{uuid4().hex[:8]}"
+        if candidate not in store.projects_by_id:
+            return candidate
+
+    raise RuntimeError(
+        "Failed to generate a unique project ID after 10 attempts."
+    )

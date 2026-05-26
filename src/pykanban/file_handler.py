@@ -1,3 +1,5 @@
+"""File I/O utilities for atomic writes."""
+
 from __future__ import annotations
 
 import os

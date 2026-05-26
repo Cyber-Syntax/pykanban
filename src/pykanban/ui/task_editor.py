@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pykanban.core.models import Priority, Status, Task
-from pykanban.core.store import AppState
+from pykanban.models import Priority, Status, Task
+from pykanban.store import AppState
 
 
 class TaskEditorPanel(QWidget):

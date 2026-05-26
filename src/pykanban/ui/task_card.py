@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from pykanban.core.models import Task
+from pykanban.models import Task
 
 # Matches task list checkbox: "- [ ]" or "- [x]"
 TASK_CHECKBOX_RE = re.compile(r"- \[(x| )\]", re.IGNORECASE)

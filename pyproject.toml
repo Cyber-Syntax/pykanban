@@ -186,3 +186,9 @@ check_untyped_defs = true
 warn_redundant_casts = true
 warn_unreachable = true
 show_error_codes = true
+
+[tool.basedpyright]
+# Suppress missing import warnings
+# this mostly give error for PySide6 imports which false-positive
+reportMissingImports = "none"
+reportMissingTypeStubs = "none"

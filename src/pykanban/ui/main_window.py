@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pykanban.core.store import AppState
+from pykanban.store import AppState
 from pykanban.ui.error_banner import ErrorBanner
 from pykanban.ui.kanban_board import KanbanBoard
 from pykanban.ui.project_sidebar import ProjectSidebar

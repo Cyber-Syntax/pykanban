@@ -16,8 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pykanban.core.models import Priority, Status, Task
-from pykanban.core.store import AppState, BoardView
+from pykanban.models import Priority, Status, Task
+from pykanban.store import AppState, BoardView
 
 _DONE_DEFAULT_LIMIT: int = 10
 

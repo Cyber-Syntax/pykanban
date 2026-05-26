@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
-from pykanban.core.models import Status
-from pykanban.core.store import AppState, BoardView
+from pykanban.models import Status
+from pykanban.store import AppState, BoardView
 from pykanban.ui.kanban_column import KanbanColumn
 
 

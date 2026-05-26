@@ -16,8 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pykanban.core.models import Project
-from pykanban.core.store import AppState
+from pykanban.models import Project
+from pykanban.store import AppState
 
 
 class ProjectSidebar(QWidget):

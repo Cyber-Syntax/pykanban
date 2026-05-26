@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pykanban.core.models import Project, Status, Task
+from pykanban.models import Project, Status, Task
 
 if TYPE_CHECKING:
-    from pykanban.core.store import TaskStore
+    from pykanban.store import TaskStore
 
 
 def get_column(

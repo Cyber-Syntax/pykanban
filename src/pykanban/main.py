@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from pykanban.config import CONFIG_DIR, CONFIG_FILE, Settings, load_settings
-from pykanban.core.store import AppState
+from pykanban.store import AppState
 from pykanban.ui.main_window import MainWindow
 from pykanban.ui.settings_dialog import SettingsDialog
 
