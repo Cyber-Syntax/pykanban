@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 from pykanban.core.models import Priority, Status, Task
 from pykanban.core.store import AppState, BoardView
 
+_DONE_DEFAULT_LIMIT: int = 10
+
 
 class KanbanColumn(QWidget):
     """A single Kanban Column (Backlog / Todo / Doing / Done).
@@ -37,10 +39,21 @@ class KanbanColumn(QWidget):
         app_state: AppState,
         parent: QWidget | None = None,
     ) -> None:
+        """Initialize the column widget.
+
+        Args:
+            status: The workflow status this column represents
+            app_state: Shared application state used for all mutations
+            parent: Optional parent widget
+        """
         super().__init__(parent)
         self.status = status
         self.app_state = app_state
+
+        # Whether the DONE column has been fully expanded by user.
         self._show_all_done = False
+
+        # Full task list for this column (set by refresh())
         self._tasks: list[Task] = []
 
         self.setAcceptDrops(True)
@@ -80,21 +93,49 @@ class KanbanColumn(QWidget):
         layout.addWidget(scroll)
         layout.addWidget(self.show_more)
 
-    # ── public ───────────────────────────────────────────────────────────
+        self.setMinimumWidth(200)
 
+    # public
     def refresh(self, tasks: list[Task]) -> None:
+        """Repopulate the column with a new ordered task list.
+
+        Called by KanbanBoard.refresh() wheneve the board state changes
+
+        Args:
+            tasks: Ordered list of tasks for this column.
+        """
         self._tasks = tasks
         self._rebuild_cards()
 
-    # ── drag & drop ──────────────────────────────────────────────────────
-
+    # drag & drop
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        """Accept drag events that carry a task-id MIME payload.
+
+        Only our custom MIME type is accepted so that foreign drags
+        (e.g files from a file manager) are ignored.
+
+        Args:
+            event: The drag-enter event provided by Qt.
+        """
         if event.mimeData().hasFormat("application/x-task-id"):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        """Handle a task card being dropped into this column.
+
+        Decides between two cases:
+        - Same column drop -> reorder only (writes metadata.yml)
+        - Cross column drop -> status change (writes task file + metadata.yml)
+
+        After a succesfull mutation the updated BoardView is emitted so
+        MainWindow can refresh all columns atomically.
+
+        Args:
+            event: The drag-move event provided by Qt.
+        """
         mime = event.mimeData()
         if not mime.hasFormat("application/x-task-id"):
+            event.ignore()
             return
 
         task_id = mime.data("application/x-task-id").data().decode("utf-8")
@@ -105,17 +146,25 @@ class KanbanColumn(QWidget):
         cards_pos = self.cards_container.mapFrom(self, drop_pos)
         position = self._drop_position_index(cards_pos)
 
-        if src_status == self.status.value:
-            self.app_state.update_task(task_id, {"position": position})
-        else:
-            self.app_state.move_task(task_id, self.status, position=position)
+        try:
+            if src_status == self.status.value:
+                self.app_state.update_task(task_id, {"position": position})
+            else:
+                self.app_state.move_task(
+                    task_id, self.status, position=position
+                )
+        except KeyError:
+            # Task was deleted externally between drag-start and drop; skip.
+            event.ignore()
+            return
 
-        board = self.app_state.get_board()
-        self.board_changed.emit(board)
         event.acceptProposedAction()
 
-    # ── private ──────────────────────────────────────────────────────────
+        # Retrieve fresh board state and notify MainWindow
+        board = self.app_state.get_board()
+        self.board_changed.emit(board)
 
+    # private
     def _on_add_task(self) -> None:
         """Open the new-task prompt and create a task in this column."""
         from PySide6.QtWidgets import QInputDialog
@@ -161,18 +210,22 @@ class KanbanColumn(QWidget):
         self._rebuild_cards()
 
     def _rebuild_cards(self) -> None:
-        """Rebuild the card widgets."""
-        # Remove all items from layout including stretches using takeAt
-        while self.cards_layout.count() > 0:
+        """Clear existing card widgets and recreate them from self._tasks.
+
+        Also updates the header count and the "show more" button
+        visibility (done column only).
+        """
+        # Remove every widget currently in the card layout
+        while self.cards_layout.count():
             item = self.cards_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
 
-        # For done status, show either all tasks or just the most recent 20
+        # For done status, show either all tasks or just the most recent 10
         tasks = self._tasks
         if self.status == Status.DONE and not self._show_all_done:
-            tasks = self._tasks[-20:]
+            tasks = self._tasks[-_DONE_DEFAULT_LIMIT:]
 
         # Create a card widget for each task and add it to the layout
         for task in tasks:
@@ -184,7 +237,10 @@ class KanbanColumn(QWidget):
 
         self.cards_layout.addStretch(1)
 
-        if self.status == Status.DONE and len(self._tasks) > 20:
+        if (
+            self.status == Status.DONE
+            and len(self._tasks) > _DONE_DEFAULT_LIMIT
+        ):
             self.show_more.setVisible(True)
             self.show_more.setText(
                 "Show less" if self._show_all_done else "Show more"
@@ -192,5 +248,6 @@ class KanbanColumn(QWidget):
         else:
             self.show_more.setVisible(False)
 
+        # header always reflects the total task count not the visible count
         count = len(self._tasks)
         self.header.setText(f"{self.status.value.upper()} ({count})")
