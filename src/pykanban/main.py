@@ -6,13 +6,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from pykanban.config import (
-    CONFIG_DIR,
-    CONFIG_FILE,
-    Settings,
-    load_settings,
-    save_settings,
-)
+from pykanban.config import CONFIG_DIR, CONFIG_FILE, Settings, load_settings
 from pykanban.core.store import AppState
 from pykanban.ui.main_window import MainWindow
 from pykanban.ui.settings_dialog import SettingsDialog
@@ -23,22 +17,20 @@ _DATA_DIR = Path(__file__).parent / "data"
 
 def ensure_config_dir() -> None:
     """Ensure the config directory exists."""
-    CONFIG_DIR.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def bootstrap_settings() -> Settings:
+def bootstrap_settings() -> tuple[Settings, bool]:
     """Bootstrap the settings from the config file.
 
     If the config file does not exist, show the settings dialog
     and save the settings if the user accepts.
     """
-
     ensure_config_dir()
-    settings: Settings = load_settings()
 
     # If the config file exists, return the settings
     if CONFIG_FILE.exists():
-        return settings
+        return load_settings(), False
 
     # If the config file does not exist, show the settings dialog
     # and save the settings if the user accepts
@@ -46,10 +38,9 @@ def bootstrap_settings() -> Settings:
     if not dialog.exec():
         sys.exit(0)
 
-    settings = dialog.get_settings()
-    save_settings(settings)
-
-    return settings
+    # Save the settings and return
+    # dialog would save the settings
+    return dialog.get_settings(), True
 
 
 def seed_template(settings: Settings) -> None:
@@ -83,8 +74,14 @@ def seed_template(settings: Settings) -> None:
 def main() -> int:
     """Main entry point for pykanban."""
     app = QApplication(sys.argv)
-    settings = bootstrap_settings()
-    seed_template(settings)
+
+    # Bootstrap the settings and determine if this is the first run
+    settings, is_first_run = bootstrap_settings()
+
+    # Seed the template if this is the first run
+    if is_first_run:
+        seed_template(settings)
+
     app_state = AppState.create(settings)
     window = MainWindow(app_state)
     window.show()
