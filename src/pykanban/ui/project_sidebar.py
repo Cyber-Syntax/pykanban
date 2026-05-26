@@ -130,7 +130,12 @@ class ProjectSidebar(QWidget):
         else:
             archive_action = menu.addAction("Archive project")
 
+        # skip if no action was selected
         action = menu.exec(list_widget.mapToGlobal(pos))
+        if action is None:
+            return
+
+        # emit signal based on selected action
         if action == delete_action:
             self.project_delete_requested.emit(project_id)
         elif action == archive_action:
