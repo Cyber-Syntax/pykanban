@@ -6,20 +6,43 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from io import StringIO
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.error import YAMLError
+from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 from pykanban.repository import file_io
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pykanban.core.store import TaskStore
 
 # ruamel.yaml is used to preserve the order of fields in the YAML front matter
 # ruamel.yaml use typ="safe" default when not specified
 yaml = YAML()
+
+
+def _flow_id_list(ids: list[str]) -> CommentedSeq:
+    """Return a flow-style YAML sequence of single-quoted task ID strings.
+
+    Two problems are solved here:
+        - Flow style: renders as [id, id] instead of block "- id" lines.
+        - Signle-quoted strings: prevents ruamel/YAML 1.1 from casting IDs that
+        look like numbers (e.g. "0e532197" → float 0.0) back to non-string
+        types on the next load.
+
+    Args:
+        ids: Task ID strings to wrap.
+
+    Returns:
+        A CommentedSeq configured for flow-style output.1
+    """
+    seq = CommentedSeq([SingleQuotedScalarString(i) for i in ids])
+    seq.fa.set_flow_style()
+    return seq
 
 
 class Status(Enum):
@@ -268,7 +291,11 @@ class Project:
             "created": self.created.isoformat(),
             "updated": self.updated.isoformat(),
             "archived": self.archived,
-            "column_order": self.column_order,
+            # each list is flow-style + quoted to prevent yaml 1.1 type coercion
+            "column_order": {
+                status: _flow_id_list(ids)
+                for status, ids in self.column_order.items()
+            },
         }
 
         stream = StringIO()
