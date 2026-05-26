@@ -207,8 +207,14 @@ class AppState:
         project = self.projects.get_active()
         old_path = self._task_path(project, task_id)
 
-        position = fields.pop("position", None)
+        # Extract position and remove it from fields
+        position = fields.get("position")
         new_status = fields.get("status", task.status)
+
+        # Extract fields to update
+        fields = {
+            k: v for k, v in fields.items() if k not in {"position", "status"}
+        }
 
         if new_status != task.status:
             self._move_between_columns(project, task_id, new_status, position)
@@ -460,7 +466,11 @@ class AppState:
         return next(iter(self.projects.projects_by_id.values()))
 
     def _load_project_tasks(self, project: Project) -> set[str]:
-        """Load tasks from a project folder and return the set of loaded task IDs."""
+        """Load tasks from a project folder and return the set of loaded task IDs.
+
+        Also seeds scan_mtime_cache so the first switch_project call treats
+        unchanged files as already seen instead of re-parsing everything.
+        """
         project_task_ids: set[str] = set()
         for md_file in project.folder_path.rglob("*.md"):
             task = Task.from_file(md_file)
@@ -469,6 +479,12 @@ class AppState:
                 continue
             self.tasks.put(task)
             project_task_ids.add(task.id)
+            # seed the mtime cache while we have the file in hand
+            try:
+                self.scan_mtime_cache[md_file] = md_file.stat().st_mtime
+            except OSError:
+                # file disappeared between rglob and stat; skip silently
+                pass
         return project_task_ids
 
     def _record_conflicts(self, folder: Path) -> None:
