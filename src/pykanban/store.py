@@ -9,10 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from pykanban.config import Settings
 from pykanban import board_logic
-from pykanban.models import ParseError, Priority, Project, Status, Task
+from pykanban.config import Settings
 from pykanban.file_handler import WriteError
+from pykanban.models import ParseError, Priority, Project, Status, Task
 
 
 @dataclass
@@ -102,6 +102,7 @@ class AppState:
             settings=settings,
         )
 
+    # TODO: add test for error handling
     def startup_scan(self, projects_dir: Path) -> None:
         """Scan all project folders on startup and populate stores.
 
@@ -117,8 +118,18 @@ class AppState:
         self.errors = []
         self.scan_mtime_cache = {}
 
-        # Directory may not exist yet on a brand-new install
+        # dir may not exist; removed/deleted or first-run
         if not projects_dir.exists():
+            # recreate the empty directory, so the app doesn't crash
+            projects_dir.mkdir(parents=True, exist_ok=True)
+
+            # trigger the error banner in the UI, something is wrong
+            self.errors.append(
+                ParseError(
+                    path=projects_dir,
+                    reason="Projects directory not found. Created an empty projects directory. Please check your config, make sure it's pointing to your projects directory, and restart the app.",
+                )
+            )
             return
 
         # collect all folders to scan: top-level projecst + archive sub folder.
@@ -495,9 +506,7 @@ class AppState:
         self.tasks = TaskStore()
         self.scan_mtime_cache = {}
 
-        scan = scan_project_folder(
-            project.folder_path, self.scan_mtime_cache
-        )
+        scan = scan_project_folder(project.folder_path, self.scan_mtime_cache)
         self.scan_mtime_cache = scan.mtime_cache
 
         # Load changed tasks
@@ -533,6 +542,10 @@ class AppState:
 
         return next(iter(self.projects.projects_by_id.values()))
 
+    # TODO: handle corrupted project metadata.yml properly
+    # if there is no metadata.yml -> skip
+    # try to parse the yaml, if it fails, record the folder name and error
+    # show error to user for corrupted yaml so they can fix it
     def _load_project_tasks(self, project: Project) -> set[str]:
         """Load tasks from a project folder and return the set of loaded task IDs.
 
