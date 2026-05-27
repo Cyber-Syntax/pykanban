@@ -5,18 +5,65 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from pykanban.config import Settings, load_settings, save_settings
+import pytest
+
+from pykanban.config import ConfigError, Settings, load_settings, save_settings
 
 
 class TestLoadSettings:
     """Unit tests for config.load_settings."""
 
+    def test_load_settings_raises_on_non_dict(self, tmp_path: Path) -> None:
+        """Valid YAML that isn't a mapping raises ConfigError."""
+        from pykanban.config import ConfigError, load_settings
+
+        config_file = tmp_path / "config.yml"
+        # Valid YAML but a list, not a dict
+        config_file.write_text("- item1\n- item2\n")
+
+        with (
+            patch("pykanban.config.CONFIG_FILE", config_file),
+            pytest.raises(ConfigError, match="doesn't contain mapping"),
+        ):
+            load_settings()
+
+    def test_load_settings_raises_on_yaml_error(self, tmp_path: Path) -> None:
+        """Malformed YAML causes a ConfigError with a helpful message."""
+        config_file = tmp_path / "config.yml"
+        # invalid yaml that wil trip the parser
+        config_file.write_text("]\n")
+
+        with (
+            patch("pykanban.config.CONFIG_FILE", config_file),
+            pytest.raises(ConfigError, match="is not valid YAML"),
+        ):
+            load_settings()
+
+    def test_load_settings_raises_on_wrong_keys(self, tmp_path: Path) -> None:
+        """Valid YAML but wrong keys raises ConfigError."""
+        config_file = tmp_path / "config.yml"
+        # Valid YAML but missing the expected 'projects_dir' key
+        config_file.write_text("$0}projects_dir: /some/path\n")
+
+        with (
+            patch("pykanban.config.CONFIG_FILE", config_file),
+            pytest.raises(ConfigError, match="doesn't contain mapping"),
+        ):
+            load_settings()
+
     def test_returns_defaults_when_no_config_file(
         self, tmp_path: Path
     ) -> None:
         """Returns the default Settings when the config file does not exist."""
-        with patch("pykanban.config.CONFIG_FILE", tmp_path / "missing.yml"):
+        fake_path = tmp_path / "missing.yml"
+        # guard: proves our fake path is truly absent
+        assert not fake_path.exists()
+        # config_file = tmp_path / "config.yml"
+        # config_file.write_text("not: valid: yaml: [unclosed")
+
+        with patch("pykanban.config.CONFIG_FILE", fake_path):
             result = load_settings()
+
         assert result.projects_dir == Settings().projects_dir
 
     def test_reads_projects_dir_from_file(self, tmp_path: Path) -> None:
