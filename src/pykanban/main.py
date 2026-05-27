@@ -4,9 +4,15 @@ import shutil
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
-from pykanban.config import CONFIG_DIR, CONFIG_FILE, Settings, load_settings
+from pykanban.config import (
+    CONFIG_DIR,
+    CONFIG_FILE,
+    ConfigError,
+    Settings,
+    load_settings,
+)
 from pykanban.store import AppState
 from pykanban.ui.main_window import MainWindow
 from pykanban.ui.settings_dialog import SettingsDialog
@@ -30,7 +36,14 @@ def bootstrap_settings() -> tuple[Settings, bool]:
 
     # If the config file exists, return the settings
     if CONFIG_FILE.exists():
-        return load_settings(), False
+        try:
+            return load_settings(), False
+        except ConfigError as e:
+            # show a modal error dialog before exiting:
+            QMessageBox.critical(
+                None, "Configuration Error", str(e), QMessageBox.Ok
+            )
+            sys.exit(1)
 
     # If the config file does not exist, show the settings dialog
     # and save the settings if the user accepts
@@ -62,9 +75,12 @@ def seed_template(settings: Settings) -> None:
         return
 
     template_src = _DATA_DIR / "learn-pykanban"
-    # template not bundled - skip silently, don't crash
+    # raise if bundled template not found
     if not template_src.exists():
-        return
+        raise FileNotFoundError(
+            f"Bundled template not found at {template_src}."
+            "The package may be installed incorrectly."
+        )
 
     destination = projects_dir / "learn-pykanban"
     if not destination.exists():

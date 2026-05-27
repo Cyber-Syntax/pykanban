@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from ruamel.yaml import YAML
+from ruamel.yaml import YAML, YAMLError
 
 # Create .config/pykanban/config.yml and keep the projects_dir
 # load settings function to load from config.yml
@@ -23,6 +23,13 @@ class Settings:
     projects_dir: Path = Path.home() / "Documents" / "pykanban-projects"
 
 
+class ConfigError(Exception):
+    """Raised when the configuration is invalid."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
 def load_settings() -> Settings:
     """Load settings from the config file.
 
@@ -40,13 +47,30 @@ def load_settings() -> Settings:
     if not CONFIG_FILE.exists():
         return default_settings
 
-    # The file exists, read it
-    with CONFIG_FILE.open() as f:
-        data = yaml.load(f)
+    # catch YAML errors and turn them into a ConfigError
+    try:
+        # The file exists, read it
+        with CONFIG_FILE.open() as f:
+            data = yaml.load(f)
+    except YAMLError as e:
+        # TODO: log a warning here when you add logger
+        raise ConfigError(
+            f"The config file {CONFIG_FILE} is not valid YAML.\n"
+            f"Details: {e}\n\nPlease fix or delete it and restart the app."
+        ) from e
 
-    # Pull the project_dir from the config, or use the default
-    project_dir = Path(data.get("projects_dir", str(Settings().projects_dir)))
-    return Settings(projects_dir=Path(project_dir).expanduser().resolve())
+    # catch malformed yml, validate config.yml
+    if not isinstance(data, dict) or "projects_dir" not in data:
+        raise ConfigError(
+            f"The config file {CONFIG_FILE} doesn't contain mapping\n"
+            "Please fix or delete it and restart"
+        )
+
+    # Pull the projects_dir from the config, or use the default
+    projects_dir = Path(
+        data.get("projects_dir", str(default_settings.projects_dir))
+    )
+    return Settings(projects_dir=Path(projects_dir).expanduser().resolve())
 
 
 def save_settings(settings: Settings) -> None:
