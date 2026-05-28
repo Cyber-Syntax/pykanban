@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
+
+from PySide6.QtWidgets import QMessageBox
 
 from pykanban import board_logic
 from pykanban.config import Settings
@@ -102,7 +105,6 @@ class AppState:
             settings=settings,
         )
 
-    # TODO: add test for error handling
     def startup_scan(self, projects_dir: Path) -> None:
         """Scan all project folders on startup and populate stores.
 
@@ -118,18 +120,34 @@ class AppState:
         self.errors = []
         self.scan_mtime_cache = {}
 
-        # dir may not exist; removed/deleted or first-run
+        # dir may not exist; removed/deleted
         if not projects_dir.exists():
             # recreate the empty directory, so the app doesn't crash
-            projects_dir.mkdir(parents=True, exist_ok=True)
-
-            # trigger the error banner in the UI, something is wrong
-            self.errors.append(
-                ParseError(
-                    path=projects_dir,
-                    reason="Projects directory not found. Created an empty projects directory. Please check your config, make sure it's pointing to your projects directory, and restart the app.",
+            try:
+                projects_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                self.errors.append(
+                    ParseError(
+                        path=projects_dir,
+                        reason=f"Failed to create projects directory. Critical permission error: {e}",
+                    )
                 )
-            )
+                QMessageBox.critical(
+                    None,
+                    "Permission Error",
+                    f"Failed to create projects directory. Critical permission error: {e}",
+                    QMessageBox.Ok,
+                )
+                sys.exit(1)
+            # show error_banner warning that we created empty dir for user
+            # but that's uncommon that something probably went wrong
+            else:
+                self.errors.append(
+                    ParseError(
+                        path=projects_dir,
+                        reason="Projects directory not found. Created an empty projects directory. Please check your config, make sure it's pointing to your projects directory, and restart the app.",
+                    )
+                )
             return
 
         # collect all folders to scan: top-level projecst + archive sub folder.
@@ -158,7 +176,14 @@ class AppState:
             self.projects.put(project)
 
         active = self._choose_active_project()
+        # show error_banner if there are no projects found:
         if active is None:
+            self.errors.append(
+                ParseError(
+                    path=projects_dir,
+                    reason="No projects found. Your projects dir seems deleted by external process. Please check your projects_dir exists and has project folders with metadata.yml files, and restart the app.",
+                )
+            )
             return
 
         # load tasks only for non-archived projects to keep memory lean
@@ -262,6 +287,7 @@ class AppState:
 
         task.updated = datetime.now()
 
+        # TODO: write test
         try:
             # Remove old path if it exists and is different from the new path
             new_path = self._task_path(project, task_id)
@@ -276,6 +302,7 @@ class AppState:
 
         return task
 
+    # TODO: edge case handling; if position -1 what happen?
     def move_task(
         self, task_id: str, new_status: Status, position: int
     ) -> Task:
@@ -296,6 +323,7 @@ class AppState:
         task.status = new_status
         task.updated = datetime.now()
 
+        # TODO: write tests
         try:
             task.write(self._task_path(project, task_id))
             project.write()
@@ -314,6 +342,7 @@ class AppState:
         project = self.projects.get_active()
         path = self._task_path(project, task_id)
 
+        # TODO: write tests
         try:
             path.unlink()
         except OSError as e:
@@ -323,6 +352,7 @@ class AppState:
         self._remove_from_columns(project, task_id)
         self.tasks.remove(task_id)
 
+        # TODO: write tests
         try:
             project.write()
         except WriteError as e:
@@ -365,7 +395,15 @@ class AppState:
 
         project_id = generate_project_id(self.projects)
         folder = self.settings.projects_dir / self._slugify(title)
-        folder.mkdir(parents=True, exist_ok=True)
+        # TODO: implement a dialog or error_banner that show the warning to user
+        # prevent same project folder creation with same title
+        if folder.exists():
+            raise ValueError(
+                f"A project folder with the name '{folder.name}' already exists. Please choose a different title."
+            )
+
+        # don't use exist_ok=True to avoid accidentally overwriting
+        folder.mkdir(parents=True)
 
         now = datetime.now()
         project = Project(
@@ -382,6 +420,7 @@ class AppState:
 
         self.projects.put(project)
 
+        # TODO: write tests
         try:
             project.write()
         except WriteError as e:
@@ -401,6 +440,7 @@ class AppState:
         """
         project = self.projects.projects_by_id[project_id]
 
+        # TODO: write tests
         try:
             shutil.rmtree(str(project.folder_path))
         except OSError as e:
@@ -409,6 +449,7 @@ class AppState:
             )
             return
 
+        # TODO: write tests
         # drop the project and all its tasks from memory
         del self.projects.projects_by_id[project_id]
         for task_id in list(self.tasks.tasks_by_id):
@@ -438,6 +479,7 @@ class AppState:
         archive_root.mkdir(parents=True, exist_ok=True)
 
         new_folder = archive_root / project.folder_path.name
+        # TODO: write tests
         try:
             shutil.move(str(project.folder_path), str(new_folder))
         except OSError as e:
@@ -450,6 +492,7 @@ class AppState:
         project.archived = True
         project.updated = datetime.now()
 
+        # TODO: write tests
         try:
             project.write()
         except WriteError as e:
@@ -475,6 +518,7 @@ class AppState:
             self.settings.projects_dir / project.folder_path.name
         )
 
+        # TODO: write tests
         try:
             shutil.move(str(archived_folder_path), str(project_folder_path))
         except OSError as e:
@@ -487,6 +531,7 @@ class AppState:
         project.archived = False
         project.updated = datetime.now()
 
+        # TODO: write tests
         try:
             project.write()
         except WriteError as e:
@@ -509,6 +554,7 @@ class AppState:
         scan = scan_project_folder(project.folder_path, self.scan_mtime_cache)
         self.scan_mtime_cache = scan.mtime_cache
 
+        # TODO: write tests
         # Load changed tasks
         for path in scan.changed_paths:
             task = Task.from_file(path)
@@ -517,6 +563,7 @@ class AppState:
                 continue
             self.tasks.put(task)
 
+        # TODO: write tests, handle edge case
         # Handle deleted tasks
         for path in scan.deleted_paths:
             # Extract task_id from path if possible (for reconciliation)
@@ -525,6 +572,7 @@ class AppState:
 
         project.reconcile_order(set(self.tasks.tasks_by_id.keys()), self.tasks)
 
+        # TODO: write tests
         # Record conflicts from scan result
         for path in scan.conflict_paths:
             self.errors.append(ConflictWarning(path=path))
@@ -540,6 +588,7 @@ class AppState:
             if not project.archived:
                 return project
 
+        # TODO: write tests
         return next(iter(self.projects.projects_by_id.values()))
 
     # TODO: handle corrupted project metadata.yml properly
@@ -560,6 +609,8 @@ class AppState:
                 continue
             self.tasks.put(task)
             project_task_ids.add(task.id)
+
+            # TODO: write tests
             # seed the mtime cache while we have the file in hand
             try:
                 self.scan_mtime_cache[md_file] = md_file.stat().st_mtime
@@ -648,6 +699,7 @@ class AppState:
 
     def _slugify(self, value: str) -> str:
         """Create a filesystem-safe slug from a title."""
+        # TODO: write tests
         # if a callable (e.g a method) is passed, call it to get the value
         if callable(value):
             value = value()
@@ -676,6 +728,7 @@ def scan_project_folder(
     current: dict[Path, float] = {}
     changed: list[Path] = []
 
+    # TODO: write tests
     for path in project_folder.rglob("*.md"):
         try:
             mtime = path.stat().st_mtime
@@ -697,6 +750,10 @@ def scan_project_folder(
 
 
 # TODO: make them pure function?
+# TODO: it would be better to raise error_banner for this later
+# but mvp is to just raise and error and log it,
+# since this is an extremely unlikely edge case
+# and we don't want to block users with a non-unique ID error
 def generate_task_id(store: TaskStore) -> str:
     """Generate a unique task ID."""
     for _ in range(10):
@@ -716,6 +773,7 @@ def generate_project_id(store: ProjectStore) -> str:
         if candidate not in store.projects_by_id:
             return candidate
 
+    # TODO: write tests
     raise RuntimeError(
         "Failed to generate a unique project ID after 10 attempts."
     )
