@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
 
         self._initial_load()
 
+    # TODO: can we make privates public?
+    # can we make them pure function?
+    # can we decrease the coupling?
     def _build_layout(self) -> None:
         center = QWidget()
         main_layout = QVBoxLayout(center)
@@ -83,6 +86,7 @@ class MainWindow(QMainWindow):
         self.editor.task_saved.connect(self._refresh_from_state)
         self.sidebar.project_selected.connect(self._switch_project)
         self.sidebar.new_project_requested.connect(self._create_project)
+        self.sidebar.project_rename_requested.connect(self._rename_project)
         self.sidebar.project_delete_requested.connect(self._delete_project)
         self.sidebar.project_archive_requested.connect(self._archive_project)
         self.sidebar.project_unarchive_requested.connect(
@@ -100,6 +104,7 @@ class MainWindow(QMainWindow):
         task = self.app.get_task(task_id)
         self.editor.load_task(task)
 
+    # TODO: write test
     def _delete_task(self, task_id: str) -> None:
         """Confirm and delete the task, then refresh the board.
 
@@ -184,7 +189,7 @@ class MainWindow(QMainWindow):
         store so the sidebar can still display the title under archived.
 
         Args:
-            project_id: ID of the project to delete.
+            project_id: ID of the project to archive.
         """
         project = self.app.get_project(project_id)
         if project is None:
@@ -250,4 +255,25 @@ class MainWindow(QMainWindow):
         self.sidebar.refresh(list(self.app.projects_list))
 
         # refresh from state handles fetching and redering the board
+        self._refresh_from_state()
+
+    def _rename_project(self, project_id: str) -> None:
+        """Handle renaming a project from the sidebar."""
+        project = self.app.get_project(project_id)
+        if project is None:
+            return
+
+        new_title, ok = QInputDialog.getText(
+            self, "Rename Project", "New project title:", text=project.title
+        )
+        if not ok or not new_title.strip():
+            return
+
+        self.app.projects.rename_project(project_id, new_title.strip())
+
+        # refresh the sidebar to show the updated title
+        self.sidebar.refresh(list(self.app.projects_list))
+
+        # refresh the board state to see the error_banner
+        # if there is an error with the project after renaming
         self._refresh_from_state()

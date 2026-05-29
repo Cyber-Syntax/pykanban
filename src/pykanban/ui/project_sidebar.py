@@ -28,6 +28,7 @@ class ProjectSidebar(QWidget):
     project_delete_requested = Signal(str)
     project_archive_requested = Signal(str)
     project_unarchive_requested = Signal(str)
+    project_rename_requested = Signal(str)
 
     def __init__(
         self, app: KanbanApp, parent: QWidget | None = None
@@ -124,7 +125,7 @@ class ProjectSidebar(QWidget):
 
         archive_action = None
         unarchive_action = None
-
+        rename_action = menu.addAction("Rename project")
         if is_archived:
             unarchive_action = menu.addAction("Unarchive project")
         else:
@@ -142,3 +143,5 @@ class ProjectSidebar(QWidget):
             self.project_archive_requested.emit(project_id)
         elif action == unarchive_action:
             self.project_unarchive_requested.emit(project_id)
+        elif action == rename_action:
+            self.project_rename_requested.emit(project_id)

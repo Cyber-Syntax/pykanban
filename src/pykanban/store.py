@@ -569,6 +569,45 @@ class ProjectManager:
 
         return project
 
+    #TODO: write tests
+    def rename_project(self, project_id: str, new_title: str) -> None:
+        """Rename a project by changing its title and folder name.
+
+        Args:
+            project_id: Project ID to rename.
+            new_title: New title for the project.
+        """
+        project = self.state.projects.projects_by_id[project_id]
+        old_folder = project.folder_path
+        new_folder = old_folder.parent / slugify(new_title)
+
+        # prevent same project folder creation with same title
+        if new_folder.exists():
+            self.state.errors.append(
+                ParseError(
+                    path=new_folder,
+                    reason=f"A project folder with the name '{new_folder.name}' already exists. Please choose a different title.",
+                )
+            )
+            return
+
+        try:
+            shutil.move(str(old_folder), str(new_folder))
+        except OSError as e:
+            self.state.errors.append(
+                ParseError(path=old_folder, reason=str(e))
+            )
+            return
+
+        project.folder_path = new_folder
+        project.title = new_title.strip()
+        project.updated = datetime.now()
+
+        try:
+            project.write()
+        except WriteError as e:
+            self.state.errors.append(ParseError(path=e.path, reason=e.reason))
+
     def delete_project(self, project_id: str) -> None:
         """Permanently delete a project folder and remove it from the memory.
 
@@ -800,8 +839,24 @@ class KanbanApp:
         self.projects.switch_project(project_id)
 
     def create_project(self, title: str, description: str) -> Project:
-        """Create a new project."""
+        """Create a new project.
+
+        Args:
+            title: Title of the new project.
+            description: Description of the new project.
+        """
         return self.projects.create_project(title, description)
+
+    def rename_project(self, project_id: str, new_title: str) -> None:
+        """Rename a project by ID.
+
+        This changes the project's title and folder name.
+
+        Args:
+            project_id: ID of the project to rename.
+            new_title: New title for the project.
+        """
+        self.projects.rename_project(project_id, new_title)
 
     def put_project(self, project: Project) -> None:
         """Add or update a project."""
