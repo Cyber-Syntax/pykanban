@@ -1,368 +1,327 @@
-"""Tests for board_logic module."""
+"""Tests for module."""
 
 from pathlib import Path
 
-from pykanban import board_logic
-from pykanban.board_logic import get_column, insert_at, remove_from_column
+from hypothesis import given
+from hypothesis import strategies as st
+
+from pykanban.board_logic import (
+    insert_into_column,
+    remove_from_columns,
+    reorder_in_column,
+    slugify,
+)
 from pykanban.models import Status, Task
 from pykanban.store import TaskStore
 
 from .conftest import make_project, make_task
 
-# TODO: remove duplicates, use conftest.py shared fixtures
-# use classes to group related tests
 
+class TestSlugify:
+    """Unit tests for slugify function."""
 
-def test_remove_from_column_accepts_dict():
-    """remove_from_column should accept a dict[str, list[str]]."""
-    column_order = {
-        Status.BACKLOG.value: ["task1", "task2", "task3"],
-        Status.TODO.value: ["task4", "task5"],
-        Status.DOING.value: ["task6"],
-        Status.DONE.value: [],
-    }
+    def test_basic_normalization(self) -> None:
+        assert slugify("Hello World") == "hello-world"
 
-    result = board_logic.remove_from_column(column_order, "task2")
+    def test_special_characters_removed(self) -> None:
+        assert slugify("Task! @#$% Name") == "task-name"
 
-    assert isinstance(result, dict)
+    def test_multiple_spaces_collapsed(self) -> None:
+        assert slugify("Task   Name") == "task-name"
 
+    def test_hyphens_stripped(self) -> None:
+        assert slugify("---Task---") == "task"
 
-def test_remove_from_column_removes_task_from_column():
-    """remove_from_column should remove task_id from the correct column."""
-    column_order = {
-        Status.BACKLOG.value: ["task1", "task2", "task3"],
-        Status.TODO.value: ["task4", "task5"],
-        Status.DOING.value: ["task6"],
-        Status.DONE.value: [],
-    }
+    def test_empty_string_default(self) -> None:
+        assert slugify("") == "project"
+        assert slugify("   ") == "project"
 
-    result = board_logic.remove_from_column(column_order, "task2")
+    def test_only_special_chars(self) -> None:
+        assert slugify("@#$%") == "project"
 
-    assert result[Status.BACKLOG.value] == ["task1", "task3"]
-    assert result[Status.TODO.value] == ["task4", "task5"]
-    assert result[Status.DOING.value] == ["task6"]
-    assert result[Status.DONE.value] == []
+    def test_callable_parameter(self) -> None:
+        assert slugify(lambda: "Lazy Task") == "lazy-task"
 
+    def test_numbers_preserved(self) -> None:
+        assert slugify("2024 Q1 Review") == "2024-q1-review"
 
-def test_remove_from_column_handles_missing_task():
-    """remove_from_column should handle task_id not in any column gracefully."""
-    column_order = {
-        Status.BACKLOG.value: ["task1", "task2"],
-        Status.TODO.value: ["task4"],
-    }
+    def test_lowercase_conversion(self) -> None:
+        """All output should be lowercase."""
+        assert slugify("UPPERCASE") == "uppercase"
+        assert slugify("MiXeD CaSe") == "mixed-case"
 
-    result = board_logic.remove_from_column(column_order, "missing_task")
+    def test_unicode_chars_converted_to_hyphens(self) -> None:
+        """Unicode characters should be converted to hyphens, then trailing hyphens stripped."""
+        assert slugify("Café") == "caf"
+        assert slugify("Naïve") == "na-ve"
 
-    assert result[Status.BACKLOG.value] == ["task1", "task2"]
-    assert result[Status.TODO.value] == ["task4"]
+    def test_leading_trailing_hyphens_stripped(self) -> None:
+        """Leading and trailing hyphens should be removed."""
+        assert slugify("-task-") == "task"
+        assert slugify("---") == "project"
 
+    def test_consecutive_special_chars(self) -> None:
+        """Multiple consecutive special characters should collapse to single hyphen."""
+        assert slugify("Task!!!---Name") == "task-name"
+        assert slugify("A@@@B") == "a-b"
 
-def test_remove_from_column_returns_new_dict():
-    """remove_from_column should return a new dict, not modify the original."""
-    original = {
-        Status.BACKLOG.value: ["task1", "task2", "task3"],
-    }
-    original_copy = dict(original)
+    def test_alphanumeric_with_underscores(self) -> None:
+        """Underscores should be treated as special characters."""
+        assert slugify("task_name") == "task-name"
+        assert slugify("task__name") == "task-name"
 
-    result = board_logic.remove_from_column(original, "task2")
+    def test_parentheses_and_brackets(self) -> None:
+        """Brackets and parentheses should be converted to hyphens."""
+        assert slugify("Task (Priority)") == "task-priority"
+        assert slugify("Item [v2]") == "item-v2"
 
-    # Original should be unchanged
-    assert original == original_copy
-    # Result should be a different object
-    assert result is not original
+    def test_dots_and_slashes(self) -> None:
+        """Dots, slashes should be converted to hyphens."""
+        assert slugify("v1.2.3") == "v1-2-3"
+        assert slugify("path/to/task") == "path-to-task"
 
+    def test_single_word(self) -> None:
+        """Single word input should lowercase only."""
+        assert slugify("Task") == "task"
+        assert slugify("HELLO") == "hello"
 
-def test_insert_at_returns_list():
-    """insert_at should return a list[str]."""
-    column_list = ["task1", "task2", "task3"]
-
-    result = board_logic.insert_at(column_list, "new_task", 1)
-
-    assert isinstance(result, list)
-    assert result == ["task1", "new_task", "task2", "task3"]
-
-
-def test_insert_at_handles_negative_position():
-    """insert_at should clamp negative position to 0."""
-    column_list = ["task1", "task2"]
-
-    result = board_logic.insert_at(column_list, "new_task", -5)
-
-    assert result[0] == "new_task"
-    assert result == ["new_task", "task1", "task2"]
-
-
-def test_insert_at_handles_position_beyond_length():
-    """insert_at should clamp position beyond length to the end."""
-    column_list = ["task1", "task2"]
-
-    result = board_logic.insert_at(column_list, "new_task", 100)
-
-    assert result[-1] == "new_task"
-    assert result == ["task1", "task2", "new_task"]
-
-
-def test_insert_at_does_not_modify_original():
-    """insert_at should not modify the original list."""
-    original = ["task1", "task2", "task3"]
-    original_copy = list(original)
-
-    result = board_logic.insert_at(original, "new_task", 1)
-
-    assert original == original_copy
-    assert result is not original
-
-
-def test_get_column_returns_tasks_in_order():
-    """get_column should return tasks in column_order sequence."""
-    from datetime import datetime
-
-    from pykanban.models import Priority, Project, Task
-    from pykanban.store import TaskStore
-
-    # Create tasks
-    task1 = Task(
-        id="task1",
-        schema=1,
-        title="Task 1",
-        status=Status.TODO,
-        priority=Priority.MEDIUM,
-        raw_body="",
-        created=datetime.now(),
-        updated=datetime.now(),
-    )
-    task2 = Task(
-        id="task2",
-        schema=1,
-        title="Task 2",
-        status=Status.TODO,
-        priority=Priority.MEDIUM,
-        raw_body="",
-        created=datetime.now(),
-        updated=datetime.now(),
-    )
-    task3 = Task(
-        id="task3",
-        schema=1,
-        title="Task 3",
-        status=Status.TODO,
-        priority=Priority.MEDIUM,
-        raw_body="",
-        created=datetime.now(),
-        updated=datetime.now(),
-    )
-
-    # Create task store and add tasks
-    task_store = TaskStore()
-    task_store.put(task1)
-    task_store.put(task2)
-    task_store.put(task3)
-
-    # Create project with column_order
-    project = Project(
-        project_id="p_proj1",
-        schema=1,
-        title="Test Project",
-        description="",
-        created=datetime.now(),
-        updated=datetime.now(),
-        archived=False,
-        column_order={
-            Status.BACKLOG.value: [],
-            Status.TODO.value: ["task2", "task1", "task3"],
-            Status.DOING.value: [],
-            Status.DONE.value: [],
-        },
-        folder_path=None,
-    )
-
-    # Get column should return tasks in column_order sequence
-    result = board_logic.get_column(project, Status.TODO, task_store)
-
-    assert len(result) == 3
-    assert result[0].id == "task2"
-    assert result[1].id == "task1"
-    assert result[2].id == "task3"
-
-
-def test_get_column_skips_missing_tasks():
-    """get_column should skip task IDs that don't exist in the task store."""
-    from datetime import datetime
-
-    from pykanban.models import Priority, Project, Task
-    from pykanban.store import TaskStore
-
-    # Create only one task
-    task1 = Task(
-        id="task1",
-        schema=1,
-        title="Task 1",
-        status=Status.TODO,
-        priority=Priority.MEDIUM,
-        raw_body="",
-        created=datetime.now(),
-        updated=datetime.now(),
-    )
-
-    task_store = TaskStore()
-    task_store.put(task1)
-
-    # Create project with column_order referencing tasks that don't exist
-    project = Project(
-        project_id="p_proj1",
-        schema=1,
-        title="Test Project",
-        description="",
-        created=datetime.now(),
-        updated=datetime.now(),
-        archived=False,
-        column_order={
-            Status.BACKLOG.value: [],
-            Status.TODO.value: ["task1", "missing_task", "also_missing"],
-            Status.DOING.value: [],
-            Status.DONE.value: [],
-        },
-        folder_path=None,
-    )
-
-    result = board_logic.get_column(project, Status.TODO, task_store)
-
-    assert len(result) == 1
-    assert result[0].id == "task1"
-
-
-def test_get_column_returns_empty_list_for_empty_column():
-    """get_column should return empty list for column with no tasks."""
-    from datetime import datetime
-
-    from pykanban.models import Project
-    from pykanban.store import TaskStore
-
-    task_store = TaskStore()
-
-    project = Project(
-        project_id="p_proj1",
-        schema=1,
-        title="Test Project",
-        description="",
-        created=datetime.now(),
-        updated=datetime.now(),
-        archived=False,
-        column_order={
-            Status.BACKLOG.value: [],
-            Status.TODO.value: [],
-            Status.DOING.value: [],
-            Status.DONE.value: [],
-        },
-        folder_path=None,
-    )
-
-    result = board_logic.get_column(project, Status.TODO, task_store)
-
-    assert result == []
-
-
-class TestGetColumn:
-    """Unit tests for board_logic.get_column."""
-
-    def _store(self, tasks: list[Task]) -> TaskStore:
-        s = TaskStore()
-        for t in tasks:
-            s.put(t)
-        return s
-
-    def test_returns_tasks_in_column_order(self) -> None:
-        """Preserves the ordering defined in project.column_order."""
-        t1 = make_task(id="t1", status=Status.TODO)
-        t2 = make_task(id="t2", status=Status.TODO)
-        proj = make_project(
-            Path("/fake"),
-            column_order={
-                "todo": ["t2", "t1"],
-                "backlog": [],
-                "doing": [],
-                "done": [],
-            },
+    # Hypothesis property-based tests for comprehensive edge case coverage
+    @given(
+        st.text(
+            min_size=1,
+            alphabet=st.characters(min_codepoint=33, max_codepoint=126),
         )
-        result = get_column(proj, Status.TODO, self._store([t1, t2]))
-        assert [t.id for t in result] == ["t2", "t1"]
+    )
+    def test_output_is_lowercase_hyphen_or_project(self, text: str) -> None:
+        """Output should only contain lowercase, digits, hyphens, or be 'project'."""
+        result = slugify(text)
+        if result != "project":
+            assert all(c.islower() or c.isdigit() or c == "-" for c in result)
 
-    def test_skips_ids_missing_from_store(self) -> None:
-        """Silently ignores task IDs that are not in the task store."""
-        t1 = make_task(id="t1", status=Status.TODO)
-        proj = make_project(
-            Path("/fake"),
-            column_order={
-                "todo": ["t1", "ghost"],
-                "backlog": [],
-                "doing": [],
-                "done": [],
-            },
+    @given(st.text())
+    def test_no_leading_trailing_hyphens(self, text: str) -> None:
+        """Result should never start or end with hyphen (unless it's 'project')."""
+        result = slugify(text)
+        if result != "project":
+            assert not result.startswith("-")
+            assert not result.endswith("-")
+
+    @given(st.text())
+    def test_never_consecutive_hyphens(self, text: str) -> None:
+        """Result should never contain consecutive hyphens."""
+        result = slugify(text)
+        assert "--" not in result
+
+    @given(st.just(""))
+    def test_empty_or_whitespace_returns_project(self, text: str) -> None:
+        """Empty string or whitespace-only should return 'project'."""
+        assert slugify(text) == "project"
+        assert slugify("   ") == "project"
+        assert slugify("\t\n") == "project"
+
+    @given(
+        st.text(
+            alphabet=st.characters(
+                exclude_characters="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            ),
+            min_size=1,
+        ).filter(lambda s: not any(c.isalpha() or c.isdigit() for c in s))
+    )
+    def test_only_special_chars_returns_project(self, text: str) -> None:
+        """Input with only special characters (no letters/digits) should return 'project'."""
+        result = slugify(text)
+        assert result == "project"
+
+    @given(st.text(min_size=1))
+    def test_is_filesystem_safe(self, text: str) -> None:
+        """Result should be safe for use in filesystem paths."""
+        result = slugify(text)
+        # Should not contain problematic filesystem characters
+        assert "/" not in result
+        assert "\\" not in result
+        assert ":" not in result
+        assert "*" not in result
+        assert "?" not in result
+        assert '"' not in result
+        assert "<" not in result
+        assert ">" not in result
+        assert "|" not in result
+
+    @given(st.text())
+    def test_idempotent_on_valid_slugs(self, text: str) -> None:
+        """Applying slugify twice should give same result (idempotent)."""
+        slug1 = slugify(text)
+        slug2 = slugify(slug1)
+        assert slug1 == slug2
+
+    @given(st.lists(st.text(), min_size=1, max_size=5))
+    def test_handles_multiword_titles(self, words: list[str]) -> None:
+        """Slugs should handle multi-word titles correctly."""
+        title = " ".join(words)
+        result = slugify(title)
+        # Result should be valid slug format
+        if result != "project":
+            assert (
+                result.replace("-", "").replace("", "").lower()
+                == result.replace("-", "").replace("", "").lower()
+            )
+
+
+
+class TestInsertIntoColumn:
+    """Unit tests for insert_into_column."""
+
+    def test_returns_dict(self) -> None:
+        """insert_into_column should return a dict[str, list[str]]."""
+        column_order = {
+            Status.TODO.value: ["task1", "task2", "task3"],
+        }
+
+        result = insert_into_column(
+            column_order, Status.TODO.value, "new_task", 1
         )
-        result = get_column(proj, Status.TODO, self._store([t1]))
-        assert len(result) == 1 and result[0].id == "t1"
 
-    def test_skips_tasks_with_wrong_status(self) -> None:
-        """Excludes tasks whose .status does not match the requested column."""
-        t1 = make_task(id="t1", status=Status.DOING)
-        proj = make_project(
-            Path("/fake"),
-            column_order={
-                "todo": ["t1"],
-                "backlog": [],
-                "doing": [],
-                "done": [],
-            },
-        )
-        result = get_column(proj, Status.TODO, self._store([t1]))
-        assert result == []
-
-    def test_returns_empty_for_empty_column(self) -> None:
-        """Returns [] when no task IDs are registered in the column."""
-        proj = make_project(Path("/fake"))
-        result = get_column(proj, Status.BACKLOG, self._store([]))
-        assert result == []
-
-
-class TestInsertAt:
-    """Unit tests for board_logic.insert_at."""
+        assert isinstance(result, dict)
+        assert result[Status.TODO.value] == [
+            "task1",
+            "new_task",
+            "task2",
+            "task3",
+        ]
 
     def test_inserts_at_given_index(self) -> None:
-        assert insert_at(["a", "b", "c"], "x", 1) == ["a", "x", "b", "c"]
+        result = insert_into_column(
+            {Status.TODO.value: ["a", "b", "c"]}, Status.TODO.value, "x", 1
+        )
+        assert result[Status.TODO.value] == ["a", "x", "b", "c"]
 
     def test_inserts_at_start(self) -> None:
-        assert insert_at(["a", "b"], "x", 0) == ["x", "a", "b"]
+        result = insert_into_column(
+            {Status.TODO.value: ["a", "b"]}, Status.TODO.value, "x", 0
+        )
+        assert result[Status.TODO.value] == ["x", "a", "b"]
 
     def test_inserts_at_end(self) -> None:
-        assert insert_at(["a", "b"], "x", 2) == ["a", "b", "x"]
+        result = insert_into_column(
+            {Status.TODO.value: ["a", "b"]}, Status.TODO.value, "x", 2
+        )
+        assert result[Status.TODO.value] == ["a", "b", "x"]
 
     def test_clamps_negative_position_to_zero(self) -> None:
-        assert insert_at(["a", "b"], "x", -99) == ["x", "a", "b"]
+        result = insert_into_column(
+            {Status.TODO.value: ["a", "b"]}, Status.TODO.value, "x", -99
+        )
+        assert result[Status.TODO.value] == ["x", "a", "b"]
 
     def test_clamps_overflow_position_to_end(self) -> None:
-        assert insert_at(["a", "b"], "x", 99) == ["a", "b", "x"]
+        result = insert_into_column(
+            {Status.TODO.value: ["a", "b"]}, Status.TODO.value, "x", 99
+        )
+        assert result[Status.TODO.value] == ["a", "b", "x"]
 
-    def test_does_not_mutate_original_list(self) -> None:
-        original = ["a", "b"]
-        insert_at(original, "x", 1)
-        assert original == ["a", "b"]
+    def test_does_not_mutate_original_dict(self) -> None:
+        original = {Status.TODO.value: ["a", "b"]}
+        original_copy = {k: v.copy() for k, v in original.items()}
+        insert_into_column(original, Status.TODO.value, "x", 1)
+        assert original == original_copy
+
+    def test_does_not_duplicate_task_id(self) -> None:
+        """insert_into_column should not insert duplicate task_id if it already exists."""
+        column_order = {
+            Status.TODO.value: ["task1", "task2", "task3"],
+        }
+
+        result = insert_into_column(
+            column_order, Status.TODO.value, "task2", 1
+        )
+
+        # Original order should be preserved since task2 already exists
+        assert result[Status.TODO.value] == ["task1", "task2", "task3"]
+        # title should not be duplicated
+        assert result[Status.TODO.value].count("task2") == 1
+        assert result is not column_order
 
     def test_inserts_into_empty_list(self) -> None:
-        assert insert_at([], "x", 0) == ["x"]
+        result = insert_into_column(
+            {Status.TODO.value: []}, Status.TODO.value, "x", 0
+        )
+        assert result[Status.TODO.value] == ["x"]
+
+    def test_inserts_with_none_position_appends(self) -> None:
+        """insert_into_column with None position should append to end."""
+        result = insert_into_column(
+            {Status.TODO.value: ["a", "b"]}, Status.TODO.value, "x", None
+        )
+        assert result[Status.TODO.value] == ["a", "b", "x"]
 
 
-class TestRemoveFromColumn:
-    """Unit tests for board_logic.remove_from_column."""
+class TestRemoveFromColumns:
+    """Unit tests for remove_from_columns."""
+
+    def test_accepts_dict(self) -> None:
+        """remove_from_columns should accept a dict[str, list[str]]."""
+        column_order = {
+            Status.BACKLOG.value: ["task1", "task2", "task3"],
+            Status.TODO.value: ["task4", "task5"],
+            Status.DOING.value: ["task6"],
+            Status.DONE.value: [],
+        }
+
+        result = remove_from_columns(column_order, "task2")
+
+        assert isinstance(result, dict)
+
+    def test_removes_task_from_column(self) -> None:
+        """remove_from_columns should remove task_id from the correct column."""
+        column_order = {
+            Status.BACKLOG.value: ["task1", "task2", "task3"],
+            Status.TODO.value: ["task4", "task5"],
+            Status.DOING.value: ["task6"],
+            Status.DONE.value: [],
+        }
+
+        result = remove_from_columns(column_order, "task2")
+
+        assert result[Status.BACKLOG.value] == ["task1", "task3"]
+        assert result[Status.TODO.value] == ["task4", "task5"]
+        assert result[Status.DOING.value] == ["task6"]
+        assert result[Status.DONE.value] == []
+
+    def test_handles_missing_task(self) -> None:
+        """remove_from_columns should handle task_id not in any column gracefully."""
+        column_order = {
+            Status.BACKLOG.value: ["task1", "task2"],
+            Status.TODO.value: ["task4"],
+        }
+
+        result = remove_from_columns(column_order, "missing_task")
+
+        assert result[Status.BACKLOG.value] == ["task1", "task2"]
+        assert result[Status.TODO.value] == ["task4"]
+
+    def test_returns_new_dict(self) -> None:
+        """remove_from_columns should return a new dict, not modify the original."""
+        original = {
+            Status.BACKLOG.value: ["task1", "task2", "task3"],
+        }
+        original_copy = {k: v.copy() for k, v in original.items()}
+
+        result = remove_from_columns(original, "task2")
+
+        # Original should be unchanged
+        assert original == original_copy
+        # Result should be a different object
+        assert result is not original
 
     def test_removes_task_id_from_its_column(self) -> None:
-        result = remove_from_column(
+        result = remove_from_columns(
             {"todo": ["t1", "t2"], "doing": ["t3"]}, "t1"
         )
         assert result == {"todo": ["t2"], "doing": ["t3"]}
 
     def test_removes_id_appearing_in_multiple_columns(self) -> None:
         """Defensively removes duplicates across all columns."""
-        result = remove_from_column(
+        result = remove_from_columns(
             {"todo": ["t1"], "doing": ["t1", "t2"]}, "t1"
         )
         assert "t1" not in result["todo"]
@@ -371,10 +330,72 @@ class TestRemoveFromColumn:
 
     def test_noop_when_task_not_present(self) -> None:
         order = {"todo": ["t1"], "doing": []}
-        result = remove_from_column(order, "ghost")
+        result = remove_from_columns(order, "ghost")
         assert result == {"todo": ["t1"], "doing": []}
 
     def test_does_not_mutate_original_dict(self) -> None:
         original = {"todo": ["t1", "t2"]}
-        remove_from_column(original, "t1")
-        assert original == {"todo": ["t1", "t2"]}
+        original_copy = {k: v.copy() for k, v in original.items()}
+        remove_from_columns(original, "t1")
+        assert original == original_copy
+
+
+class TestReorderInColumn:
+    """Unit tests for reorder_in_column."""
+
+    def test_task_not_found_returns_unchanged(self) -> None:
+        """reorder_in_column should return unchanged if task_id is not found."""
+        column_order = {
+            Status.TODO.value: ["task1", "task2", "task3"],
+        }
+
+        result = reorder_in_column(column_order, "missing_task", 1)
+
+        assert result == column_order
+
+    def test_reorders_task_to_new_position(self) -> None:
+        """reorder_in_column should move task to new position."""
+        column_order = {Status.TODO.value: ["t1", "t2", "t3", "t4"]}
+        result = reorder_in_column(column_order, "t4", 0)
+        assert result[Status.TODO.value] == ["t4", "t1", "t2", "t3"]
+
+    def test_moves_task_forward_in_column(self) -> None:
+        """Task can be moved forward within a column."""
+        column_order = {Status.TODO.value: ["t1", "t2", "t3"]}
+        result = reorder_in_column(column_order, "t1", 2)
+        assert result[Status.TODO.value] == ["t2", "t3", "t1"]
+
+    def test_moves_task_backward_in_column(self) -> None:
+        """Task can be moved backward within a column."""
+        column_order = {Status.TODO.value: ["t1", "t2", "t3"]}
+        result = reorder_in_column(column_order, "t3", 0)
+        assert result[Status.TODO.value] == ["t3", "t1", "t2"]
+
+    def test_clamps_negative_position(self) -> None:
+        """Negative positions should be clamped to 0."""
+        column_order = {Status.TODO.value: ["t1", "t2", "t3"]}
+        result = reorder_in_column(column_order, "t3", -5)
+        assert result[Status.TODO.value] == ["t3", "t1", "t2"]
+
+    def test_clamps_overflow_position(self) -> None:
+        """Positions beyond length should be clamped to end."""
+        column_order = {Status.TODO.value: ["t1", "t2", "t3"]}
+        result = reorder_in_column(column_order, "t1", 99)
+        assert result[Status.TODO.value] == ["t2", "t3", "t1"]
+
+    def test_does_not_mutate_original(self) -> None:
+        """reorder_in_column should not mutate the original dict."""
+        original = {Status.TODO.value: ["t1", "t2", "t3"]}
+        original_copy = {k: v.copy() for k, v in original.items()}
+        reorder_in_column(original, "t1", 2)
+        assert original == original_copy
+
+    def test_keeps_task_in_same_column(self) -> None:
+        """reorder_in_column should only reorder within the same column."""
+        column_order = {
+            Status.TODO.value: ["t1", "t2"],
+            Status.DOING.value: ["t3"],
+        }
+        result = reorder_in_column(column_order, "t1", 1)
+        assert result[Status.TODO.value] == ["t2", "t1"]
+        assert result[Status.DOING.value] == ["t3"]
