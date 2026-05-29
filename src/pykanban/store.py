@@ -13,7 +13,6 @@ from PySide6.QtWidgets import QMessageBox
 
 from pykanban.board_logic import (
     build_task_file_path,
-    get_column,
     insert_into_column,
     remove_from_columns,
     reorder_in_column,
@@ -123,6 +122,19 @@ def generate_project_id(store: ProjectStore) -> str:
     raise RuntimeError(
         "Failed to generate a unique project ID after 10 attempts."
     )
+
+
+def get_column(
+    project: Project, status: Status, task_store: TaskStore
+) -> list[Task]:
+    """Return tasks in the column order for the given status."""
+    column_ids = project.column_order.get(status.value, [])
+    tasks: list[Task] = []
+    for task_id in column_ids:
+        task = task_store.tasks_by_id.get(task_id)
+        if task and task.status == status:
+            tasks.append(task)
+    return tasks
 
 
 def scan_project_folder(

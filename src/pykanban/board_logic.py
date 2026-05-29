@@ -1,26 +1,9 @@
+"""Board logic functions for managing task columns and file paths."""
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from pykanban.models import Project, Status, Task
-
-if TYPE_CHECKING:
-    from pykanban.store import TaskStore
-
-
-def get_column(
-    project: Project, status: Status, task_store: TaskStore
-) -> list[Task]:
-    """Return tasks in the column order for the given status."""
-    column_ids = project.column_order.get(status.value, [])
-    tasks: list[Task] = []
-    for task_id in column_ids:
-        task = task_store.tasks_by_id.get(task_id)
-        if task and task.status == status:
-            tasks.append(task)
-    return tasks
 
 
 def slugify(value: str) -> str:
