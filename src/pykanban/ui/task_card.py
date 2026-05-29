@@ -30,6 +30,21 @@ from PySide6.QtWidgets import (
 
 from pykanban.models import Task
 
+# TODO: improve cards
+# use QTQuick.Controls.ComboBox for selecting status, priority... directly from card
+# title can be changed directly from card via QtQuick.Controls.TextInput
+#
+# you check those and implement the basic, no need to fancy design
+# need to be useful
+# https://doc.qt.io/qt-6/stylesheet-examples.html
+# https://doc.qt.io/qt-6/qtwidgets-index.html
+
+# this good looking for it is QML only, need to write qml language?
+# this isn't for good for begginers, so maybe later
+# More better found: https://doc.qt.io/qt-6/qtquickcontrols-material.html
+# 	import QtQuick.Controls.Material
+
+
 # Matches task list checkbox: "- [ ]" or "- [x]"
 TASK_CHECKBOX_RE = re.compile(r"- \[(x| )\]", re.IGNORECASE)
 

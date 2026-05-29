@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.models import Project
-from pykanban.store import AppState
+from pykanban.store import AppState, KanbanApp
 
 
 class ProjectSidebar(QWidget):
@@ -30,16 +30,16 @@ class ProjectSidebar(QWidget):
     project_unarchive_requested = Signal(str)
 
     def __init__(
-        self, app_state: AppState, parent: QWidget | None = None
+        self, app: KanbanApp, parent: QWidget | None = None
     ) -> None:
         """Initialize the sidebar.
 
         Args:
-            app_state: Application state instance.
+            app: Kanban application instance.
             parent: Optional parent widget.
         """
         super().__init__(parent)
-        self.app_state = app_state
+        self.app: KanbanApp = app
 
         self.active_list = QListWidget()
         self.archived_list = QListWidget()
@@ -116,7 +116,7 @@ class ProjectSidebar(QWidget):
         project_id = item.data(0x0100)
 
         # get project and check if archived
-        project = self.app_state.projects.projects_by_id[project_id]
+        project = self.app.state.projects.projects_by_id[project_id]
         is_archived = project.archived
 
         menu = QMenu(self)

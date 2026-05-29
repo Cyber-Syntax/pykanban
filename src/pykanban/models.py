@@ -70,6 +70,7 @@ class ParseError:
     reason: str
 
 
+# TODO: refactor god object Task and Project into separate parsing and data classes, e.g. TaskData + TaskParser
 @dataclass
 class Task:
     """Task."""
@@ -83,6 +84,10 @@ class Task:
     created: datetime
     updated: datetime
 
+    # NOTE: error_banner currently show the error when this schema wrong
+    # TODO: seperate validation to another function
+    # similar function validation also work for projects too
+    # maybe we could do one function to validate both?
     @classmethod
     def from_file(cls, path: Path) -> Task | ParseError:
         """Parse a task from a file."""

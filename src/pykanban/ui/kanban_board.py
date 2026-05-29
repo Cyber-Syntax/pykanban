@@ -5,33 +5,36 @@ Uses PySide6 for UI rendering.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from pykanban.models import Status
-from pykanban.store import AppState, BoardView
+from pykanban.store import KanbanApp
 from pykanban.ui.kanban_column import KanbanColumn
+
+if TYPE_CHECKING:
+    from pykanban.store import BoardView, KanbanApp
 
 
 class KanbanBoard(QWidget):
     """Container for all task columns."""
 
-    def __init__(
-        self, app_state: AppState, parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, app: KanbanApp, parent: QWidget | None = None) -> None:
         """Initialize the board widget.
 
         Args:
-            app_state: Application state instance.
+            app: Kanban application instance.
             parent: Optional parent widget.
         """
         super().__init__(parent)
-        self.app_state = app_state
+        self.app: KanbanApp = app
 
-        self.columns = {
-            Status.BACKLOG: KanbanColumn(Status.BACKLOG, app_state),
-            Status.TODO: KanbanColumn(Status.TODO, app_state),
-            Status.DOING: KanbanColumn(Status.DOING, app_state),
-            Status.DONE: KanbanColumn(Status.DONE, app_state),
+        self.columns: dict[Status, KanbanColumn] = {
+            Status.BACKLOG: KanbanColumn(Status.BACKLOG, self.app),
+            Status.TODO: KanbanColumn(Status.TODO, self.app),
+            Status.DOING: KanbanColumn(Status.DOING, self.app),
+            Status.DONE: KanbanColumn(Status.DONE, self.app),
         }
 
         layout = QHBoxLayout(self)

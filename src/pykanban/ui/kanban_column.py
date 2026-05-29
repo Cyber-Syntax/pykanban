@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.models import Priority, Status, Task
-from pykanban.store import AppState, BoardView
+from pykanban.store import BoardView, KanbanApp
 
 _DONE_DEFAULT_LIMIT: int = 10
 
@@ -38,19 +38,19 @@ class KanbanColumn(QWidget):
     def __init__(
         self,
         status: Status,
-        app_state: AppState,
+        app: KanbanApp,
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the column widget.
 
         Args:
             status: The workflow status this column represents
-            app_state: Shared application state used for all mutations
+            app: Kanban application instance
             parent: Optional parent widget
         """
         super().__init__(parent)
-        self.status = status
-        self.app_state = app_state
+        self.status: Status = status
+        self.app: KanbanApp = app
 
         # Whether the DONE column has been fully expanded by user.
         self._show_all_done = False
@@ -150,9 +150,9 @@ class KanbanColumn(QWidget):
 
         try:
             if src_status == self.status.value:
-                self.app_state.update_task(task_id, {"position": position})
+                self.app.update_task(task_id, {"position": position})
             else:
-                self.app_state.move_task(
+                self.app.move_task(
                     task_id, self.status, position=position
                 )
         except KeyError:
@@ -163,9 +163,10 @@ class KanbanColumn(QWidget):
         event.acceptProposedAction()
 
         # Retrieve fresh board state and notify MainWindow
-        board = self.app_state.get_board()
+        board = self.app.get_board()
         self.board_changed.emit(board)
 
+    #TODO: are those private methods are really needed to be private?
     # private
     def _on_add_task(self) -> None:
         """Open the new-task prompt and create a task in this column."""
@@ -177,13 +178,13 @@ class KanbanColumn(QWidget):
         if not ok or not title.strip():
             return
 
-        self.app_state.create_task(
+        self.app.create_task(
             title=title.strip(),
             status=self.status,
             priority=Priority.MEDIUM,
             body="",
         )
-        board = self.app_state.get_board()
+        board: BoardView = self.app.get_board()
         self.board_changed.emit(board)
 
     def _drop_position_index(self, pos: QPoint) -> int:

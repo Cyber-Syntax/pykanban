@@ -13,7 +13,7 @@ from pykanban.config import (
     Settings,
     load_settings,
 )
-from pykanban.store import AppState
+from pykanban.store import KanbanApp
 from pykanban.ui.main_window import MainWindow
 from pykanban.ui.settings_dialog import SettingsDialog
 
@@ -89,7 +89,7 @@ def seed_template(settings: Settings) -> None:
 
 def main() -> int:
     """Main entry point for pykanban."""
-    app = QApplication(sys.argv)
+    app_qt = QApplication(sys.argv)
 
     # Bootstrap the settings and determine if this is the first run
     settings, is_first_run = bootstrap_settings()
@@ -98,11 +98,11 @@ def main() -> int:
     if is_first_run:
         seed_template(settings)
 
-    app_state = AppState.create(settings)
-    window = MainWindow(app_state)
+    kanban_app = KanbanApp(settings)
+    window = MainWindow(kanban_app)
     window.show()
 
-    return app.exec()
+    return app_qt.exec()
 
 
 if __name__ == "__main__":

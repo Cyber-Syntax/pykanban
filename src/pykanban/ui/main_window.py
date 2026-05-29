@@ -5,6 +5,8 @@ Uses PySide6 for UI rendering.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -15,11 +17,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pykanban.store import AppState
+from pykanban.store import KanbanApp
 from pykanban.ui.error_banner import ErrorBanner
 from pykanban.ui.kanban_board import KanbanBoard
 from pykanban.ui.project_sidebar import ProjectSidebar
 from pykanban.ui.task_editor import TaskEditorPanel
+
+if TYPE_CHECKING:
+    from pykanban.store import KanbanApp
 
 
 def center_window(window: QMainWindow) -> None:
@@ -35,15 +40,15 @@ def center_window(window: QMainWindow) -> None:
 class MainWindow(QMainWindow):
     """Main application window."""
 
-    def __init__(self, state: AppState) -> None:
+    def __init__(self, app: KanbanApp) -> None:
         """Initialize the main app."""
         super().__init__()
-        self.app_state = state
+        self.app: KanbanApp = app
 
         self.error_banner = ErrorBanner()
-        self.sidebar = ProjectSidebar(self.app_state)
-        self.board = KanbanBoard(self.app_state)
-        self.editor = TaskEditorPanel(self.app_state)
+        self.sidebar = ProjectSidebar(self.app)
+        self.board = KanbanBoard(self.app)
+        self.editor = TaskEditorPanel(self.app)
 
         self._build_layout()
         self._wire_signals()
@@ -85,14 +90,14 @@ class MainWindow(QMainWindow):
         )
 
     def _initial_load(self) -> None:
-        self.app_state.startup_scan(self.app_state.settings.projects_dir)
+        self.app.projects.startup_scan(self.app.state.settings.projects_dir)
         self.sidebar.refresh(
-            list(self.app_state.projects.projects_by_id.values())
+            list(self.app.state.projects.projects_by_id.values())
         )
         self._refresh_from_state()
 
     def _open_task(self, task_id: str) -> None:
-        task = self.app_state.tasks.get(task_id)
+        task = self.app.get_task(task_id)
         self.editor.load_task(task)
 
     def _delete_task(self, task_id: str) -> None:
@@ -105,7 +110,7 @@ class MainWindow(QMainWindow):
         Args:
             task_id: The ID of the task to delete.
         """
-        task = self.app_state.tasks.get(task_id)
+        task = self.app.get_task(task_id)
         if task is None:
             return
 
@@ -123,21 +128,21 @@ class MainWindow(QMainWindow):
         if self.editor._task and self.editor._task.id == task_id:
             self.editor.clear()
 
-        self.app_state.delete_task(task_id)
+        self.app.tasks.delete_task(task_id)
         self._refresh_from_state()
 
     def _refresh_from_state(self) -> None:
-        """Refresh board from AppState — no-op when no project is active yet."""
-        if self.app_state.projects.active_project_id is None:
+        """Refresh board from MemoryStateManager — no-op when no project is active yet."""
+        if self.app.state.projects.active_project_id is None:
             # Nothing to render; show empty banner state
-            self.error_banner.set_errors(self.app_state.errors)
+            self.error_banner.set_errors(self.app.state.errors)
             return
-        board = self.app_state.get_board()
+        board = self.app.get_board()
         self._refresh_board(board)
 
     def _refresh_board(self, board) -> None:
         self.board.refresh(board)
-        self.error_banner.set_errors(self.app_state.errors)
+        self.error_banner.set_errors(self.app.state.errors)
 
     def _delete_project(self, project_id: str) -> None:
         """Confirm and permanently delete a project, then refresh the UI.
@@ -148,7 +153,7 @@ class MainWindow(QMainWindow):
         Args:
             project_id: ID of the project to delete.
         """
-        project = self.app_state.projects.projects_by_id.get(project_id)
+        project = self.app.state.projects.projects_by_id.get(project_id)
         if project is None:
             return
 
@@ -165,25 +170,23 @@ class MainWindow(QMainWindow):
 
         # clear editor and board before mutating state
         self.editor.clear()
-        self.app_state.delete_project(project_id)
+        self.app.delete_project(project_id)
 
         # refresh sidebar; board will show empty state if no project remains
-        self.sidebar.refresh(
-            list(self.app_state.projects.projects_by_id.values())
-        )
+        self.sidebar.refresh(list(self.app.projects_list))
         self._refresh_from_state()
 
     def _archive_project(self, project_id: str) -> None:
         """Confirm and move a project to archive, then refresh the UI.
 
         Tasks are dropped from memory after archiving (handled by
-        AppState.archive_project) while the project metadata stays in the
+        MemoryStateManager.archive_project) while the project metadata stays in the
         store so the sidebar can still display the title under archived.
 
         Args:
             project_id: ID of the project to delete.
         """
-        project = self.app_state.projects.projects_by_id.get(project_id)
+        project = self.app.get_project(project_id)
         if project is None:
             return
 
@@ -200,22 +203,18 @@ class MainWindow(QMainWindow):
 
         # Clear editor and board before mutating state
         self.editor.clear()
-        self.app_state.archive_project(project_id)
+        self.app.archive_project(project_id)
 
         # Sidebar refresh moves the item from active -> archived section
-        self.sidebar.refresh(
-            list(self.app_state.projects.projects_by_id.values())
-        )
+        self.sidebar.refresh(list(self.app.projects_list))
 
         # boards shows empty state since active_project_id is now None
         self._refresh_from_state()
 
     def _unarchive_project(self, project_id: str) -> None:
         """Unarchive the project and refresh the UI."""
-        self.app_state.unarchive_project(project_id)
-        self.sidebar.refresh(
-            list(self.app_state.projects.projects_by_id.values())
-        )
+        self.app.unarchive_project(project_id)
+        self.sidebar.refresh(list(self.app.projects_list))
         self._refresh_from_state()
 
     def _switch_project(self, project_id: str) -> None:
@@ -224,8 +223,8 @@ class MainWindow(QMainWindow):
         self.editor.clear()
 
         # switch to the new project and refresh the board
-        board = self.app_state.switch_project(project_id)
-        self._refresh_board(board)
+        self.app.switch_project(project_id)
+        self._refresh_from_state()
 
     def _create_project(self) -> None:
         """Handle the 'New project' button from the sidebar."""
@@ -239,17 +238,16 @@ class MainWindow(QMainWindow):
         )
 
         # create the project
-        project = self.app_state.create_project(title.strip(), desc.strip())
+        project = self.app.projects.create_project(title.strip(), desc.strip())
 
         # clear the editor and switch to the new project
         self.editor.clear()
 
         # switch to the new project and refresh the board
-        board = self.app_state.switch_project(project.project_id)
-        self._refresh_board(board)
+        self.app.switch_project(project.project_id)
 
-        # refresh the sidebar to show the new project
-        self.sidebar.refresh(
-            list(self.app_state.projects.projects_by_id.values())
-        )
+        # refresh the sidebar
+        self.sidebar.refresh(list(self.app.projects_list))
+
+        # refresh from state handles fetching and redering the board
         self._refresh_from_state()

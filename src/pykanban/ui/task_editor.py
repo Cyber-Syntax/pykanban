@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.models import Priority, Status, Task
-from pykanban.store import AppState
+from pykanban.store import AppState, KanbanApp
 
 
 class TaskEditorPanel(QWidget):
@@ -28,16 +28,16 @@ class TaskEditorPanel(QWidget):
     task_saved = Signal()
 
     def __init__(
-        self, app_state: AppState, parent: QWidget | None = None
+        self, app: KanbanApp, parent: QWidget | None = None
     ) -> None:
         """Initialize the editor panel.
 
         Args:
-            app_state: Application state instance.
+            app: Kanban application instance.
             parent: Optional parent widget.
         """
         super().__init__(parent)
-        self.app_state = app_state
+        self.app: KanbanApp = app
         self._task: Task | None = None
 
         self.title_edit = QLineEdit()
@@ -135,7 +135,7 @@ class TaskEditorPanel(QWidget):
             "priority": priority,
             "raw_body": self.body_edit.toPlainText(),
         }
-        self.app_state.update_task(self._task.id, fields)
+        self.app.tasks.update_task(self._task.id, fields)
         self._render_checklist(fields["raw_body"])
         self.task_saved.emit()
 

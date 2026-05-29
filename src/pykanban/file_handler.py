@@ -43,11 +43,14 @@ def atomic_write(path: Path, content: str) -> None:
             os.fsync(f.fileno())
         # Path.replace() is the pathlib eqivalent of os.replace
         tmp_path.replace(path)
+    # TODO: add it to logging when logger is implemented
     except OSError as e:
-        # Best effort cleanup; do not mask the error if cleanup fails.
+        # try to cleanup tmp file if it exists
         try:
             if tmp_path.exists():
                 tmp_path.unlink()
         except OSError:
+            # ignore cleanup failure to be able to report the WriteError
+            # We try to delete it, but if we can't, we accept the failure and move on.
             pass
         raise WriteError(path=path, reason=str(e)) from e
