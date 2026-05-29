@@ -17,90 +17,111 @@ if TYPE_CHECKING:
 class TestMain:
     """unit test for main parts like QApplication, MainWindow."""
 
-    def test_main_returns_app_exec(self, tmp_path: Path) -> None:
-        # mock QApplication, bootstrap_settings, AppState and MainWindow
+    @patch("pykanban.main.QApplication")
+    @patch("pykanban.main.bootstrap_settings")
+    @patch("pykanban.main.KanbanApp")
+    @patch("pykanban.main.MainWindow")
+    @patch("pykanban.main.seed_template")
+    def test_main_returns_app_exec(
+        self,
+        mock_seed_template,
+        mock_main_window,
+        mock_kanban_app_cls,
+        mock_bootstrap,
+        mock_qapplication,
+        tmp_path: Path,
+    ) -> None:
+        # mock QApplication to return a fake app instance
         mock_app = MagicMock()
         mock_app.exec.return_value = 0
-        mock_app_cls = MagicMock(return_value=mock_app)
+        mock_qapplication.return_value = mock_app
 
+        # mock settings and KanbanApp initialization
         mock_settings = Settings(projects_dir=tmp_path / "projects")
-        mock_state = MagicMock()
-        mock_window = MagicMock()
+        mock_kanban_app = MagicMock()
+        mock_kanban_app_cls.return_value = mock_kanban_app
+        mock_bootstrap.return_value = (mock_settings, False)
 
-        with (
-            patch("pykanban.main.QApplication", mock_app_cls),
-            patch(
-                "pykanban.main.bootstrap_settings",
-                return_value=(mock_settings, False),
-            ),
-            patch("pykanban.main.AppState.create", return_value=mock_state),
-            patch("pykanban.main.MainWindow", return_value=mock_window),
-            patch("pykanban.main.seed_template"),
-        ):
-            result = main()
+        # call main
+        result = main()
 
-        # check if app.exec() was called and returned 0(success)
+        # verify app.exec() was called and returned 0(success)
         assert result == 0
         mock_app.exec.assert_called_once()
 
+    @patch("pykanban.main.QApplication")
+    @patch("pykanban.main.bootstrap_settings")
+    @patch("pykanban.main.KanbanApp")
+    @patch("pykanban.main.MainWindow")
+    @patch("pykanban.main.seed_template")
     def test_main_calls_seed_template_on_first_run(
-        self, tmp_path: Path
+        self,
+        mock_seed_template,
+        mock_window,
+        mock_kanban_app_cls,
+        mock_bootstrap,
+        mock_qapplication,
+        tmp_path: Path,
     ) -> None:
 
+        # create mocks for QT app and window
         mock_app = MagicMock()
         mock_app.exec.return_value = 0
-        mock_app_cls = MagicMock(return_value=mock_app)
+        mock_qapplication.return_value = mock_app
 
+        # setup mocks for settings and KanbanApp
         mock_settings = Settings(projects_dir=tmp_path / "projects")
-        mock_state = MagicMock()
-        mock_window = MagicMock()
-        mock_seed = MagicMock()
+        mock_kanban_app = MagicMock()
+        mock_kanban_app_cls.return_value = mock_kanban_app
+        mock_bootstrap.return_value = (
+            mock_settings,
+            True,
+        )  # is_first_run=True
 
-        with (
-            patch("pykanban.main.QApplication", mock_app_cls),
-            patch(
-                "pykanban.main.bootstrap_settings",
-                return_value=(mock_settings, True),
-            ),
-            patch("pykanban.main.AppState.create", return_value=mock_state),
-            patch("pykanban.main.MainWindow", return_value=mock_window),
-            patch("pykanban.main.seed_template", mock_seed),
-        ):
-            main()
+        # call main
+        main()
 
         # check if seed_template was called
-        mock_seed.assert_called_once_with(mock_settings)
+        mock_seed_template.assert_called_once_with(mock_settings)
 
-    def test_main_creates_window_and_state(self, tmp_path: Path) -> None:
+    @patch("pykanban.main.QApplication")
+    @patch("pykanban.main.bootstrap_settings")
+    @patch("pykanban.main.KanbanApp")
+    @patch("pykanban.main.MainWindow")
+    @patch("pykanban.main.seed_template")
+    def test_main_creates_window_and_state(
+        self,
+        mock_seed_template,
+        mock_main_window,
+        mock_kanban_app_cls,
+        mock_bootstrap,
+        mock_qapplication,
+        tmp_path: Path,
+    ) -> None:
 
+        # create mocks for QT app
         mock_app = MagicMock()
         mock_app.exec.return_value = 0
-        mock_app_cls = MagicMock(return_value=mock_app)
+        mock_qapplication.return_value = mock_app
 
+        # setup mocks for settings and KanbanApp
         mock_settings = Settings(projects_dir=tmp_path / "projects")
-        mock_state = MagicMock()
-        mock_window = MagicMock()
+        mock_kanban_app = MagicMock()
+        mock_bootstrap.return_value = (
+            mock_settings,
+            False,
+        )  # is_first_run=False
+        mock_kanban_app_cls.return_value = mock_kanban_app
 
-        with (
-            patch("pykanban.main.QApplication", mock_app_cls),
-            patch(
-                "pykanban.main.bootstrap_settings",
-                return_value=(mock_settings, False),
-            ),
-            patch(
-                "pykanban.main.AppState.create", return_value=mock_state
-            ) as mock_create,
-            patch(
-                "pykanban.main.MainWindow", return_value=mock_window
-            ) as mock_window_cls,
-            patch("pykanban.main.seed_template"),
-        ):
-            main()
+        # call main
+        main()
 
-        # check if AppState.create and MainWindow were called
-        mock_create.assert_called_once_with(mock_settings)
-        mock_window_cls.assert_called_once_with(mock_state)
-        mock_window.show.assert_called_once()
+        # verify KanbanApp was instantiated with settings
+        mock_kanban_app_cls.assert_called_once_with(mock_settings)
+        # verify MainWindow was instantiated with the KanbanApp facade
+        mock_main_window.assert_called_once_with(mock_kanban_app)
+        # verify window was shown
+        mock_main_window.return_value.show.assert_called_once()
 
 
 class TestEnsureConfig:
@@ -276,7 +297,7 @@ class TestBootstrapSettings:
         mock_ensure,
         mock_config_file,
     ) -> None:
-        """App shows a critical dialog and exist if the config file is  corrupted."""
+        """App shows a critical dialog and exist if the config file is corrupted."""
         # must raise systemexit to prevent freeze in test because of the dialog
         mock_exit.side_effect = SystemExit
 

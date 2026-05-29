@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
 from datetime import datetime
 from pathlib import Path
 
 from pykanban.models import Priority, Project, Status, Task
+from pykanban.config import Settings
+from pykanban.store import KanbanApp
 
 
 def make_project(folder_path: Path, **overrides) -> Project:
@@ -39,3 +42,18 @@ def make_task(**overrides) -> Task:
     )
     defaults.update(overrides)
     return Task(**defaults)
+
+
+@pytest.fixture
+def projects_dir(tmp_path: Path) -> Path:
+    """Fixture that provides a temporary projects directory."""
+    projects_path = tmp_path / "projects"
+    projects_path.mkdir(parents=True)
+    return projects_path
+
+
+@pytest.fixture
+def app(projects_dir: Path) -> KanbanApp:
+    """Fixture that returns a KanbanApp initialized with an empty projects directory."""
+    settings = Settings(projects_dir=projects_dir)
+    return KanbanApp(settings)

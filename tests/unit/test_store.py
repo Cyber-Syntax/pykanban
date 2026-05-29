@@ -3,68 +3,67 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
 
-from pykanban.config import Settings
-from pykanban.models import Status
-from pykanban.store import AppState
+from pykanban.models import ParseError, Project, Status, Task
 from tests.unit.conftest import make_project, make_task
 
+if TYPE_CHECKING:
+    from pykanban.store import KanbanApp
 
-class TestAppStateStartupScan:
-    """Integration tests for AppState.startup_scan."""
 
-    def test_loads_projects_and_tasks_from_disk(self, tmp_path: Path) -> None:
+class TestProjectManagerStartupScan:
+    """Integration tests for the startup scan of the project manager."""
+
+    def test_loads_projects_and_tasks_from_disk(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
         """Populates stores by scanning a real directory tree."""
-        settings = Settings(projects_dir=tmp_path / "projects")
-        settings.projects_dir.mkdir(parents=True)
-
-        proj_folder = settings.projects_dir / "p1"
+        proj_folder = projects_dir / "p1"
         proj_folder.mkdir()
-        proj = make_project(proj_folder, project_id="p_scan1234")
-        task = make_task(id="scan1111", status=Status.TODO)
+        proj: Project = make_project(proj_folder, project_id="p_scan1234")
+        task: Task = make_task(id="scan1111", status=Status.TODO)
 
         # Write actual files via the model write methods
         proj.write()
         task.write(proj_folder / f"scan-task--{task.id}.md")
 
-        state = AppState.create(settings)
-        state.startup_scan(settings.projects_dir)
+        app.startup_scan(projects_dir)
 
-        assert "p_scan1234" in state.projects.projects_by_id
-        assert "scan1111" in state.tasks.tasks_by_id
+        assert app.get_project("p_scan1234") is not None
+        assert app.get_task("scan1111") is not None
 
-    def test_handles_empty_projects_dir(self, tmp_path: Path) -> None:
+    def test_handles_empty_projects_dir(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
         """Does not crash when the projects directory contains no project folders."""
-        settings = Settings(projects_dir=tmp_path / "projects")
-        settings.projects_dir.mkdir()
-        state = AppState.create(settings)
-        state.startup_scan(settings.projects_dir)
-        assert state.projects.projects_by_id == {}
+        app.startup_scan(projects_dir)
+        assert app.state.projects.projects_by_id == {}
 
-    def test_handles_nonexistent_projects_dir(self, tmp_path: Path) -> None:
+    def test_handles_nonexistent_projects_dir(
+        self, app: KanbanApp, tmp_path: Path
+    ) -> None:
         """Returns gracefully when the projects directory does not exist yet."""
-        settings = Settings(projects_dir=tmp_path / "does-not-exist")
-        state = AppState.create(settings)
-        state.startup_scan(settings.projects_dir)  # must not raise
+        nonexistent_dir = tmp_path / "nonexistent-projects"
+        app.startup_scan(nonexistent_dir)  # must not raise
 
-    def test_bad_metadata_is_recorded_as_error(self, tmp_path: Path) -> None:
+    def test_bad_metadata_is_recorded_as_error(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
         """Records a ParseError for project folders with invalid metadata.yml."""
-        settings = Settings(projects_dir=tmp_path / "projects")
-        settings.projects_dir.mkdir(parents=True)
-        bad_folder = settings.projects_dir / "bad-project"
+        bad_folder = projects_dir / "bad-project"
         bad_folder.mkdir()
         (bad_folder / "metadata.yml").write_text("not: valid: yaml: [unclosed")
 
-        state = AppState.create(settings)
-        state.startup_scan(settings.projects_dir)
+        app.startup_scan(projects_dir)
 
-        assert len(state.errors) > 0
+        assert len(app.state.errors) > 0
 
     def test_nonexistent_projects_dir_is_recorded_as_error(
-        self, tmp_path: Path
+        self, app: KanbanApp, tmp_path: Path
     ) -> None:
         """Records a ParseError when a projects_dir is missing during scan.
 
@@ -73,41 +72,43 @@ class TestAppStateStartupScan:
         """
 
         # setup config.yml to point projects_dir
-        settings = Settings(projects_dir=tmp_path / "missing-projects")
+        missing_dir = tmp_path / "missing-projects"
 
         # do not create the projects_dir to simulate missing directory
-        state = AppState.create(settings)
-        state.startup_scan(settings.projects_dir)
+        app.startup_scan(missing_dir)
 
         # assert ParseError recorded for missing projects_dir
-        assert len(state.errors) > 0
+        assert len(app.state.errors) > 0
         assert any(
-            "Projects directory not found" in e.reason for e in state.errors
+            "Projects directory not found" in e.reason
+            for e in app.state.errors
         )
 
         # assert projects_dir is created after error to allow recovery
-        assert settings.projects_dir.exists()
+        assert missing_dir.exists()
 
-    def test_empty_projects_dir_adds_error(self, tmp_path: Path) -> None:
+    def test_empty_projects_dir_adds_error(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
         """Adds a error when projects_dir exists but is empty."""
-        settings = Settings(projects_dir=tmp_path / "empty-projects")
-        settings.projects_dir.mkdir(parents=True)
+        app.startup_scan(projects_dir)
 
-        state = AppState.create(settings)
-        state.startup_scan(settings.projects_dir)
-
-        assert len(state.errors) == 1
-        assert any("No projects found" in e.reason for e in state.errors)
+        assert len(app.state.errors) == 1
+        assert any("No projects found" in e.reason for e in app.state.errors)
 
     @patch("pykanban.store.Path.mkdir")
     @patch("pykanban.store.QMessageBox.critical")
     @patch("pykanban.store.sys.exit")
     def test_startup_scan_permission_error_and_exists(
-        self, mock_exit, mock_critical, mock_mkdir_error, tmp_path: Path
+        self,
+        mock_exit,
+        mock_critical,
+        mock_mkdir_error,
+        app: KanbanApp,
+        tmp_path: Path,
     ) -> None:
         """Records a critical error if the app does not have permissions to read/write the projects_dir."""
-        settings = Settings(projects_dir=tmp_path / "no-permissions")
-        state = AppState.create(settings)
+        no_permission_dir = tmp_path / "no-permission-projects"
 
         mock_exit.side_effect = SystemExit
 
@@ -116,7 +117,111 @@ class TestAppStateStartupScan:
 
         # call it with side effect to raise systemexit
         with pytest.raises(SystemExit):
-            state.startup_scan(settings.projects_dir)
+            app.startup_scan(no_permission_dir)
 
         mock_critical.assert_called_once()
         mock_exit.assert_called_once_with(1)
+
+    def test_bad_task_file_is_recorded_as_error(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
+        """Records a ParseError for invalid task markdown files."""
+
+        proj_folder = projects_dir / "p1"
+        proj_folder.mkdir()
+        proj = make_project(proj_folder, project_id="p_scan1")
+        proj.write()
+
+        # Write an invalid task file (e.g., missing YAML front matter)
+        invalid_task = proj_folder / "invalid_task.md"
+        invalid_task.write_text("Not a valid task file without layout.")
+
+        app.startup_scan(projects_dir)
+
+        parse_errors = [
+            e for e in app.state.errors if isinstance(e, ParseError)
+        ]
+        assert len(parse_errors) > 0
+        assert any(
+            "invalid_task.md" in getattr(e, "path", str(e.path)).name
+            for e in parse_errors
+        )
+
+    def test_startup_scan_sets_active_project(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
+        """Verifies an active project is set upon successful scan."""
+        proj_folder = projects_dir / "p1"
+        proj_folder.mkdir()
+        proj = make_project(proj_folder, project_id="p_active123")
+        proj.write()
+
+        app.startup_scan(projects_dir)
+
+        #TODO: use kanbanapp method
+        assert app.state.projects.active_project_id == "p_active123"
+        # assert app.set_active_project(project_id="p_active123") is True
+        # assert app.get_active_project() is not None
+
+    def test_startup_scan_reconciles_order_isolated_per_project(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
+        """Ensures task IDs do not bleed across projects during column_order reconciliation."""
+        # Setup Project 1
+        p1_folder = projects_dir / "p1"
+        p1_folder.mkdir()
+        make_project(p1_folder, project_id="p1").write()
+        t1 = make_task(id="t1", status=Status.TODO)
+        t1.write(p1_folder / f"{t1.id}.md")
+
+        # Setup Project 2
+        p2_folder = projects_dir / "p2"
+        p2_folder.mkdir()
+        make_project(p2_folder, project_id="p2").write()
+        t2 = make_task(id="t2", status=Status.DOING)
+        t2.write(p2_folder / f"{t2.id}.md")
+
+        app.startup_scan(projects_dir)
+
+        proj1 = app.get_project("p1")
+        proj2 = app.get_project("p2")
+
+        # Gather all task IDs in their respective column orders
+        p1_ordered_ids = {
+            tid for ids in proj1.column_order.values() for tid in ids
+        }
+        p2_ordered_ids = {
+            tid for ids in proj2.column_order.values() for tid in ids
+        }
+
+        # Assert no cross-contamination
+        assert "t1" in p1_ordered_ids
+        assert "t2" not in p1_ordered_ids
+
+        assert "t2" in p2_ordered_ids
+        assert "t1" not in p2_ordered_ids
+
+    def test_startup_scan_detects_sync_conflicts(
+        self, app: KanbanApp, projects_dir: Path
+    ) -> None:
+        """Collects warnings for sync conflict files across loaded projects."""
+        from pykanban.store import ConflictWarning
+
+        # Setup Project
+        proj_folder = projects_dir / "p1"
+        proj_folder.mkdir()
+        make_project(proj_folder, project_id="p1").write()
+
+        # Simulate a sync conflict file
+        conflict_file = (
+            proj_folder / ".sync-conflict-20240101T120000Z-task1.md"
+        )
+        conflict_file.touch()
+
+        app.startup_scan(projects_dir)
+
+        conflict_warnings = [
+            e for e in app.state.errors if isinstance(e, ConflictWarning)
+        ]
+        assert len(conflict_warnings) == 1
+        assert conflict_file.name in str(conflict_warnings[0].path)
