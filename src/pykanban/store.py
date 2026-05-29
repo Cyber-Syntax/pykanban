@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from PySide6.QtWidgets import QMessageBox
@@ -18,9 +19,24 @@ from pykanban.board_logic import (
     reorder_in_column,
     slugify,
 )
-from pykanban.config import Settings
 from pykanban.file_handler import WriteError
-from pykanban.models import ParseError, Priority, Project, Status, Task
+from pykanban.models import (
+    ConflictWarning,
+    ParseError,
+    Priority,
+    Project,
+    Status,
+    Task,
+)
+from pykanban.project_utils import (
+    choose_active_project,
+    empty_column_order,
+    find_all_project_conflicts,
+    load_project_tasks,
+)
+
+if TYPE_CHECKING:
+    from pykanban.settings import Settings
 
 
 @dataclass
@@ -67,14 +83,6 @@ class ProjectStore:
     def put(self, project: Project) -> None:
         """Add or update a project."""
         self.projects_by_id[project.project_id] = project
-
-
-@dataclass(frozen=True)
-class ConflictWarning:
-    """Sync-conflict warning surfaced in the UI."""
-
-    path: Path
-    reason: str = "Sync conflict detected"
 
 
 @dataclass
@@ -474,7 +482,7 @@ class ProjectManager:
                 continue
             self.state.projects.put(project)
 
-        active = self._choose_active_project()
+        active = choose_active_project(self.state.projects.projects_by_id)
         # show error_banner if there are no projects found:
         if active is None:
             self.state.errors.append(
@@ -491,17 +499,29 @@ class ProjectManager:
                 continue
 
             # Collect task IDs for this project only
-            project_task_ids = self._load_project_tasks(project)
+            load_result = load_project_tasks(
+                project, self.state.scan_mtime_cache
+            )
+            self.state.scan_mtime_cache = load_result.updated_mtime_cache
+            self.state.errors.extend(load_result.parse_errors)
+
             # Create a temporary task store with just this project's tasks for reconciliation
             project_tasks = TaskStore()
-            for task_id in project_task_ids:
-                project_tasks.put(self.state.tasks.tasks_by_id[task_id])
+            for task in load_result.loaded_tasks:
+                # add to main store
+                self.state.tasks.put(task)
+                # add to temp project store for reconcile_order
+                project_tasks.put(task)
+
             # Reconcile using only this project's tasks
-            project.reconcile_order(project_task_ids, project_tasks)
+            project.reconcile_order(load_result.loaded_task_ids, project_tasks)
 
         self.state.projects.set_active(active.project_id)
         # Record conflicts from ALL projects, not just the active one
-        self._record_conflicts_all_projects(projects_dir)
+        conflicts = find_all_project_conflicts(
+            self.state.projects.projects_by_id
+        )
+        self.state.errors.extend(conflicts)
 
     def create_project(self, title: str, description: str) -> Project:
         """Create a new project and persist metadata.
@@ -535,7 +555,7 @@ class ProjectManager:
             created=now,
             updated=now,
             archived=False,
-            column_order=self._empty_column_order(),
+            column_order=empty_column_order(),
             folder_path=folder,
         )
 
@@ -701,62 +721,6 @@ class ProjectManager:
         # Record conflicts from scan result
         for path in scan.conflict_paths:
             self.state.errors.append(ConflictWarning(path=path))
-
-    # TODO: make them pure function if you can and move to another module
-    def _choose_active_project(self) -> Project | None:
-        """Choose an initial active project."""
-        if not self.state.projects.projects_by_id:
-            return None
-
-        for project in self.state.projects.projects_by_id.values():
-            if not project.archived:
-                return project
-
-        # TODO: write tests
-        return next(iter(self.state.projects.projects_by_id.values()))
-
-    def _load_project_tasks(self, project: Project) -> set[str]:
-        """Load tasks from a project folder and return the set of loaded task IDs.
-
-        Also seeds scan_mtime_cache so the first switch_project call treats
-        unchanged files as already seen instead of re-parsing everything.
-        """
-        project_task_ids: set[str] = set()
-        for md_file in project.folder_path.rglob("*.md"):
-            task = Task.from_file(md_file)
-            if isinstance(task, ParseError):
-                self.state.errors.append(task)
-                continue
-            self.state.tasks.put(task)
-            project_task_ids.add(task.id)
-
-            # TODO: write tests
-            # seed the mtime cache while we have the file in hand
-            try:
-                self.state.scan_mtime_cache[md_file] = md_file.stat().st_mtime
-            except OSError:
-                # file disappeared between rglob and stat; skip silently
-                pass
-        return project_task_ids
-
-    def _record_conflicts(self, folder: Path) -> None:
-        """Record sync-conflict files as warnings."""
-        for path in folder.rglob(".sync-conflict-*"):
-            self.state.errors.append(ConflictWarning(path=path))
-
-    def _record_conflicts_all_projects(self, projects_dir: Path) -> None:
-        """Record sync-conflict files from all projects."""
-        for project in self.state.projects.projects_by_id.values():
-            self._record_conflicts(project.folder_path)
-
-    def _empty_column_order(self) -> dict[str, list[str]]:
-        """Initialize an empty column order."""
-        return {
-            Status.BACKLOG.value: [],
-            Status.TODO.value: [],
-            Status.DOING.value: [],
-            Status.DONE.value: [],
-        }
 
 
 class KanbanApp:

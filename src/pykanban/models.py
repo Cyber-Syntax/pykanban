@@ -70,6 +70,14 @@ class ParseError:
     reason: str
 
 
+@dataclass(frozen=True)
+class ConflictWarning:
+    """Sync-conflict warning surfaced in the UI."""
+
+    path: Path
+    reason: str = "Sync conflict detected"
+
+
 # TODO: refactor god object Task and Project into separate parsing and data classes, e.g. TaskData + TaskParser
 @dataclass
 class Task:
