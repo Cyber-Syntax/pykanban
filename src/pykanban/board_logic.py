@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pykanban.models import Project, Status, Task
@@ -21,21 +23,133 @@ def get_column(
     return tasks
 
 
-def insert_at(
-    column_order_list: list[str], task_id: str, position: int
-) -> list[str]:
-    """Return a new list with task_id inserted at position."""
-    new_list = list(column_order_list)
-    position = max(0, min(position, len(new_list)))
-    new_list.insert(position, task_id)
-    return new_list
+def slugify(value: str) -> str:
+    """Create a filesystem-safe slug from a title.
+
+    Args:
+        value: The string to slugify.
+
+    Returns:
+        A URL-friendly string safe for file paths
+        so user can use markdown linking.
+    """
+    # TODO:write tests
+    # if a callable (e.g a method) is passed, call it to get the value
+    if callable(value):
+        value = value()
+
+    # ensure we realy have a string now
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
+    slug = slug.strip("-")
+    return slug or "project"
 
 
-def remove_from_column(
+def build_task_file_path(
+    project_folder: Path, task_title: str, task_id: str
+) -> Path:
+    """Build a task file path for a project.
+
+    The filename follows the "title-slug--id.md" pattern.
+
+    Args:
+        project_folder: The folder path of the project.
+        task_title: The title of the task to build the slug from.
+        task_id: The task ID to build the path for.
+
+    Returns:
+        The full path to the task file.
+    """
+    slug = slugify(task_title)
+    return project_folder / f"{slug}--{task_id}.md"
+
+
+def insert_into_column(
+    column_order: dict[str, list[str]],
+    status_value: str,
+    task_id: str,
+    position: int | None = None,
+) -> dict[str, list[str]]:
+    """Return a new column_order with task ID inserted into the specified column.
+
+    Args:
+        column_order: The current column order mapping.
+        status_value: The status value (column key).
+        task_id: The task ID to insert.
+        position: Optional position to insert at. If None, appends to end.
+
+    Returns:
+        A new column_order dict with the task ID inserted.
+    """
+    # Create a copy of the column_order dict and nested lists
+    new_column_order = {k: v.copy() for k, v in column_order.items()}
+
+    # Get or create the column list for the status value
+    column = new_column_order.setdefault(status_value, [])
+
+    # Task ID already exists in the column, return unchanged
+    if task_id in column:
+        return new_column_order
+
+    # Insert the task ID at the specified position
+    # or append to the end if no position is given
+    if position is None:
+        column.append(task_id)
+    else:
+        position = max(0, min(position, len(column)))
+        column.insert(position, task_id)
+
+    return new_column_order
+
+
+def remove_from_columns(
     column_order: dict[str, list[str]], task_id: str
 ) -> dict[str, list[str]]:
-    """Return a new column_order without task_id."""
-    new_order: dict[str, list[str]] = {}
-    for key, ids in column_order.items():
-        new_order[key] = [id for id in ids if id != task_id]
-    return new_order
+    """Return a new column_order with task ID removed from all columns.
+
+    Args:
+        column_order: The current column order mapping.
+        task_id: The task ID to remove.
+
+    Returns:
+        A new column_order dict with the task ID removed.
+    """
+    # Create a copy of the column_order dict and nested lists
+    new_column_order = {}
+
+    for status_value, ids in column_order.items():
+        new_ids = ids.copy()
+        if task_id in new_ids:
+            new_ids.remove(task_id)
+        new_column_order[status_value] = new_ids
+
+    return new_column_order
+
+
+def reorder_in_column(
+    column_order: dict[str, list[str]], task_id: str, position: int
+) -> dict[str, list[str]]:
+    """Return a new column_order with task ID reordered within its column.
+
+    Args:
+        column_order: The current column order mapping.
+        task_id: The task ID to reorder.
+        position: The new position in the column.
+
+    Returns:
+        A new column_order dict with the task ID reordered.
+    """
+    # Create a copy of the column_order dict and nested lists
+    new_column_order = {k: v.copy() for k, v in column_order.items()}
+
+    # Find the column that contains the task ID and reorder it
+    for ids in new_column_order.values():
+        if task_id in ids:
+            # Remove the task ID from its current position
+            ids.remove(task_id)
+            # Insert the task ID at the new position, ensuring it's within bounds
+            position = max(0, min(position, len(ids)))
+            ids.insert(position, task_id)
+            return new_column_order
+
+    # Task ID not found, return unchanged
+    return new_column_order

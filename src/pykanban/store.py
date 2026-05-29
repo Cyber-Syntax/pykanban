@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -12,31 +11,17 @@ from uuid import uuid4
 
 from PySide6.QtWidgets import QMessageBox
 
-from pykanban import board_logic
+from pykanban.board_logic import (
+    build_task_file_path,
+    get_column,
+    insert_into_column,
+    remove_from_columns,
+    reorder_in_column,
+    slugify,
+)
 from pykanban.config import Settings
 from pykanban.file_handler import WriteError
 from pykanban.models import ParseError, Priority, Project, Status, Task
-
-
-def slugify(value: str) -> str:
-    """Create a filesystem-safe slug from a title.
-
-    Args:
-        value: The string to slugify.
-
-    Returns:
-        A URL-friendly string safe for file paths
-        so user can use markdown linking.
-    """
-    # TODO:write tests
-    # if a callable (e.g a method) is passed, call it to get the value
-    if callable(value):
-        value = value()
-
-    # ensure we realy have a string now
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
-    slug = slug.strip("-")
-    return slug or "project"
 
 
 @dataclass
@@ -253,10 +238,14 @@ class TaskManager:
         )
 
         self.state.tasks.put(task)
-        self._insert_into_column(project, status, task_id, position=None)
+        self.state.projects.get_active().column_order = insert_into_column(
+            project.column_order, status.value, task_id, position=None
+        )
 
         try:
-            task.write(self._task_path(project, task_id))
+            task.write(
+                build_task_file_path(project.folder_path, task.title, task_id)
+            )
             project.write()
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
@@ -275,7 +264,9 @@ class TaskManager:
         """
         task = self.state.tasks.get(task_id)
         project = self.state.projects.get_active()
-        old_path = self._task_path(project, task_id)
+        old_path = build_task_file_path(
+            project.folder_path, task.title, task_id
+        )
 
         # Extract position and remove it from fields
         position = fields.get("position")
@@ -287,10 +278,17 @@ class TaskManager:
         }
 
         if new_status != task.status:
-            self._move_between_columns(project, task_id, new_status, position)
+            project.column_order = remove_from_columns(
+                project.column_order, task_id
+            )
+            project.column_order = insert_into_column(
+                project.column_order, new_status.value, task_id, position
+            )
             task.status = new_status
         elif position is not None:
-            self._reorder_in_column(project, task_id, position)
+            project.column_order = reorder_in_column(
+                project.column_order, task_id, position
+            )
 
         if "title" in fields:
             task.title = str(fields["title"]).strip()
@@ -304,7 +302,9 @@ class TaskManager:
         # TODO: write test
         try:
             # Remove old path if it exists and is different from the new path
-            new_path = self._task_path(project, task_id)
+            new_path = build_task_file_path(
+                project.folder_path, task.title, task_id
+            )
             if old_path != new_path and old_path.exists():
                 old_path.unlink()
 
@@ -316,7 +316,6 @@ class TaskManager:
 
         return task
 
-    # TODO: edge case handling; if position -1 what happen?
     def move_task(
         self, task_id: str, new_status: Status, position: int
     ) -> Task:
@@ -333,13 +332,20 @@ class TaskManager:
         task = self.state.tasks.get(task_id)
         project = self.state.projects.get_active()
 
-        self._move_between_columns(project, task_id, new_status, position)
+        project.column_order = remove_from_columns(
+            project.column_order, task_id
+        )
+        project.column_order = insert_into_column(
+            project.column_order, new_status.value, task_id, position
+        )
         task.status = new_status
         task.updated = datetime.now()
 
         # TODO: write tests
         try:
-            task.write(self._task_path(project, task_id))
+            task.write(
+                build_task_file_path(project.folder_path, task.title, task_id)
+            )
             project.write()
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
@@ -354,7 +360,7 @@ class TaskManager:
         """
         task = self.state.tasks.get(task_id)
         project = self.state.projects.get_active()
-        path = self._task_path(project, task_id)
+        path = build_task_file_path(project.folder_path, task.title, task_id)
 
         # TODO: write tests
         try:
@@ -363,7 +369,9 @@ class TaskManager:
             self.state.errors.append(ParseError(path=path, reason=str(e)))
             return
 
-        self._remove_from_columns(project, task_id)
+        project.column_order = remove_from_columns(
+            project.column_order, task_id
+        )
         self.state.tasks.remove(task_id)
 
         # TODO: write tests
@@ -371,65 +379,6 @@ class TaskManager:
             project.write()
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
-
-    def _task_path(self, project: Project, task_id: str) -> Path:
-        """Build a task file path for a project.
-
-        The filename follows the "title-slug--id.md" pattern.
-
-        Args:
-            project: The project to build the path for.
-            task_id: The task ID to build the path for.
-
-        Returns:
-            The full path to the task file.
-        """
-        task = self.state.tasks.get(task_id)
-        slug = slugify(task.title)
-        return project.folder_path / f"{slug}--{task_id}.md"
-
-    def _insert_into_column(
-        self,
-        project: Project,
-        status: Status,
-        task_id: str,
-        position: int | None,
-    ) -> None:
-        """Insert a task ID into a column at position."""
-        column = project.column_order.setdefault(status.value, [])
-        if position is None:
-            column.append(task_id)
-            return
-
-        position = max(0, min(position, len(column)))
-        column.insert(position, task_id)
-
-    def _remove_from_columns(self, project: Project, task_id: str) -> None:
-        """Remove a task ID from all columns."""
-        for key, ids in project.column_order.items():
-            project.column_order[key] = [i for i in ids if i != task_id]
-
-    def _reorder_in_column(
-        self, project: Project, task_id: str, position: int
-    ) -> None:
-        """Reorder a task within its current column."""
-        for key, ids in project.column_order.items():
-            if task_id in ids:
-                ids.remove(task_id)
-                position = max(0, min(position, len(ids)))
-                ids.insert(position, task_id)
-                return
-
-    def _move_between_columns(
-        self,
-        project: Project,
-        task_id: str,
-        new_status: Status,
-        position: int | None,
-    ) -> None:
-        """Move a task ID across columns."""
-        self._remove_from_columns(project, task_id)
-        self._insert_into_column(project, new_status, task_id, position)
 
 
 class ProjectManager:
@@ -741,6 +690,7 @@ class ProjectManager:
         for path in scan.conflict_paths:
             self.state.errors.append(ConflictWarning(path=path))
 
+    # TODO: make them pure function if you can and move to another module
     def _choose_active_project(self) -> Project | None:
         """Choose an initial active project."""
         if not self.state.projects.projects_by_id:
@@ -902,16 +852,16 @@ class KanbanApp:
         project = self.state.projects.get_active()
         return BoardView(
             columns={
-                Status.BACKLOG: board_logic.get_column(
+                Status.BACKLOG: get_column(
                     project, Status.BACKLOG, self.state.tasks
                 ),
-                Status.TODO: board_logic.get_column(
+                Status.TODO: get_column(
                     project, Status.TODO, self.state.tasks
                 ),
-                Status.DOING: board_logic.get_column(
+                Status.DOING: get_column(
                     project, Status.DOING, self.state.tasks
                 ),
-                Status.DONE: board_logic.get_column(
+                Status.DONE: get_column(
                     project, Status.DONE, self.state.tasks
                 ),
             }
