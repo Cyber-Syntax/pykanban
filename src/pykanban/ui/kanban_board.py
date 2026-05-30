@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
+from pykanban.app import KanbanApp
 from pykanban.models import Status
-from pykanban.store import KanbanApp
 from pykanban.ui.kanban_column import KanbanColumn
 
 if TYPE_CHECKING:

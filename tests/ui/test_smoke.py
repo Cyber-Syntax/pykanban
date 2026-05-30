@@ -7,8 +7,9 @@ These are simplified tests that validate the core corrections made in Phase 2.
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock
 
+from pykanban.app import KanbanApp
 from pykanban.models import Priority, Status, Task
-from pykanban.store import BoardView, KanbanApp
+from pykanban.store import BoardView
 from pykanban.ui.error_banner import ErrorBanner
 from pykanban.ui.kanban_column import KanbanColumn
 

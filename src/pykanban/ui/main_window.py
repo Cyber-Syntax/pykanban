@@ -17,14 +17,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from pykanban.store import KanbanApp
+from pykanban.app import KanbanApp
 from pykanban.ui.error_banner import ErrorBanner
 from pykanban.ui.kanban_board import KanbanBoard
 from pykanban.ui.project_sidebar import ProjectSidebar
 from pykanban.ui.task_editor import TaskEditorPanel
 
 if TYPE_CHECKING:
-    from pykanban.store import KanbanApp
+    from pykanban.app import KanbanApp
 
 
 def center_window(window: QMainWindow) -> None:
@@ -35,6 +35,12 @@ def center_window(window: QMainWindow) -> None:
     x = (screen.width() - size.width()) // 2
     y = (screen.height() - size.height()) // 2
     window.move(x, y)
+
+
+# TODO: write proper tests
+# TODO: can we make privates methods to public
+# to decrease complexity of testing and increase test coverage?
+# Are we violeting SRP by having all these methods in the main window instead of a controller?
 
 
 class MainWindow(QMainWindow):
@@ -59,9 +65,6 @@ class MainWindow(QMainWindow):
 
         self._initial_load()
 
-    # TODO: can we make privates public?
-    # can we make them pure function?
-    # can we decrease the coupling?
     def _build_layout(self) -> None:
         center = QWidget()
         main_layout = QVBoxLayout(center)
@@ -104,7 +107,6 @@ class MainWindow(QMainWindow):
         task = self.app.get_task(task_id)
         self.editor.load_task(task)
 
-    # TODO: write test
     def _delete_task(self, task_id: str) -> None:
         """Confirm and delete the task, then refresh the board.
 

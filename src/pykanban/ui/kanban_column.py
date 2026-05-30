@@ -16,8 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pykanban.app import KanbanApp
 from pykanban.models import Priority, Status, Task
-from pykanban.store import BoardView, KanbanApp
+from pykanban.store import BoardView
 
 _DONE_DEFAULT_LIMIT: int = 10
 
@@ -152,9 +153,7 @@ class KanbanColumn(QWidget):
             if src_status == self.status.value:
                 self.app.update_task(task_id, {"position": position})
             else:
-                self.app.move_task(
-                    task_id, self.status, position=position
-                )
+                self.app.move_task(task_id, self.status, position=position)
         except KeyError:
             # Task was deleted externally between drag-start and drop; skip.
             event.ignore()
@@ -166,7 +165,7 @@ class KanbanColumn(QWidget):
         board = self.app.get_board()
         self.board_changed.emit(board)
 
-    #TODO: are those private methods are really needed to be private?
+    # TODO: are those private methods are really needed to be private?
     # private
     def _on_add_task(self) -> None:
         """Open the new-task prompt and create a task in this column."""

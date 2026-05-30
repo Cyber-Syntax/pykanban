@@ -3,19 +3,12 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from pykanban.exceptions import WriteError
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@dataclass
-class WriteError(Exception):
-    """Raised when atomic write fails."""
-
-    path: Path
-    reason: str
 
 
 def atomic_write(path: Path, content: str) -> None:

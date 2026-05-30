@@ -5,17 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from pykanban.app import KanbanApp
 from pykanban.config import Settings
 from pykanban.models import Priority, Project, Status, Task
-from pykanban.store import (
-    BoardView,
-    KanbanApp,
-    ProjectStore,
-    TaskStore,
-    generate_project_id,
-    generate_task_id,
-    scan_project_folder,
-)
+from pykanban.project_manager import scan_project_folder
+from pykanban.store import BoardView, ProjectStore, TaskStore
+from pykanban.utils import generate_project_id, generate_task_id
 
 # ── Factories ─────────────────────────────────────────────────────────────────
 
@@ -155,7 +150,7 @@ class TestProjectStore:
 # ── store: KanbanApp.create_task ───────────────────────────────────────────────
 
 
-class TestAppStateCreateTask:
+class TestAppManagerCreateTask:
     """Unit tests for KanbanApp.create_task."""
 
     def test_task_added_to_in_memory_store(self, app: KanbanApp) -> None:
@@ -183,7 +178,7 @@ class TestAppStateCreateTask:
 # ── store: KanbanApp.update_task ───────────────────────────────────────────────
 
 
-class TestAppStateUpdateTask:
+class TestAppManagerUpdateTask:
     """Unit tests for KanbanApp.update_task."""
 
     def test_updates_title_field(self, app: KanbanApp) -> None:
@@ -219,7 +214,7 @@ class TestAppStateUpdateTask:
 # ── store: KanbanApp.move_task ─────────────────────────────────────────────────
 
 
-class TestAppStateMoveTask:
+class TestAppManagerMoveTask:
     """Unit tests for KanbanApp.move_task."""
 
     def test_moves_task_to_destination_column(self, app: KanbanApp) -> None:
@@ -246,7 +241,7 @@ class TestAppStateMoveTask:
 # ── store: KanbanApp.delete_task ───────────────────────────────────────────────
 
 
-class TestAppStateDeleteTask:
+class TestAppManagerDeleteTask:
     """Unit tests for KanbanApp.delete_task."""
 
     def test_removes_task_from_in_memory_store(self, app: KanbanApp) -> None:
@@ -293,7 +288,7 @@ class TestAppStateGetBoard:
 # ── store: KanbanApp.create_project ───────────────────────────────────────────
 
 
-class TestAppStateCreateProject:
+class TestProjectManagerCreateProject:
     """Unit tests for KanbanApp.create_project."""
 
     def test_project_added_to_store(self, app: KanbanApp) -> None:
@@ -318,7 +313,7 @@ class TestAppStateCreateProject:
 # ── store: KanbanApp.startup_scan ─────────────────────────────────────────────
 
 
-class TestAppStateArchiveProject:
+class TestProjectManagerArchiveProject:
     """Unit tests for KanbanApp.archive_project."""
 
     def test_marks_project_as_archived(self, app: KanbanApp) -> None:
@@ -340,7 +335,6 @@ class TestAppStateArchiveProject:
         # The original folder should no longer exist
         assert not original_folder.exists()
 
-
         # need to fetch the project again to get its new folder path
         archived_project = app.get_project(project.project_id)
         assert not original_folder.exists()
@@ -348,7 +342,7 @@ class TestAppStateArchiveProject:
         assert "archive" in str(archived_project.folder_path)
 
 
-class TestAppStateUnarchiveProject:
+class TestProjectManagerUnarchiveProject:
     """Unit tests for KanbanApp.unarchive_project."""
 
     def test_clears_archived_flag(self, app: KanbanApp) -> None:
@@ -365,7 +359,7 @@ class TestAppStateUnarchiveProject:
         assert "archive" not in str(proj.folder_path)
 
 
-class TestAppStateDeleteProject:
+class TestProjectManagerDeleteProject:
     """Unit tests for KanbanApp.delete_project."""
 
     def test_removes_project_from_store(self, app: KanbanApp) -> None:
@@ -391,7 +385,7 @@ class TestAppStateDeleteProject:
 # ── store: KanbanApp.switch_project ───────────────────────────────────────────
 
 
-class TestAppStateSwitchProject:
+class TestProjectManagerSwitchProject:
     """Unit tests for KanbanApp.switch_project."""
 
     def test_switch_updates_active_project(self, tmp_path: Path) -> None:

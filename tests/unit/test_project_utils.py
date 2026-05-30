@@ -4,7 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from pykanban.models import ConflictWarning, ParseError, Project, Status, Task
+from pykanban.error import ConflictWarning, ParseError
+from pykanban.models import Project, Status, Task
 from pykanban.project_utils import (
     choose_active_project,
     empty_column_order,

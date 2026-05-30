@@ -16,8 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pykanban.app import KanbanApp
 from pykanban.models import Project
-from pykanban.store import AppState, KanbanApp
 
 
 class ProjectSidebar(QWidget):
@@ -30,9 +30,7 @@ class ProjectSidebar(QWidget):
     project_unarchive_requested = Signal(str)
     project_rename_requested = Signal(str)
 
-    def __init__(
-        self, app: KanbanApp, parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, app: KanbanApp, parent: QWidget | None = None) -> None:
         """Initialize the sidebar.
 
         Args:

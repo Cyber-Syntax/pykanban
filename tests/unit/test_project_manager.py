@@ -1,19 +1,20 @@
-"""Unit tests for store.py module."""
+"""Unit tests for ProjectManager."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
 
-from pykanban.models import ConflictWarning, ParseError, Project, Status, Task
-from pykanban.store import TaskStore, get_column
+from pykanban.error import ConflictWarning, ParseError
+from pykanban.models import Project, Status, Task
 from tests.unit.conftest import make_project, make_task
 
 if TYPE_CHECKING:
-    from pykanban.store import KanbanApp
+    from pathlib import Path
+
+    from pykanban.app import KanbanApp
 
 
 class TestProjectManagerStartupScan:
@@ -97,9 +98,9 @@ class TestProjectManagerStartupScan:
         assert len(app.state.errors) == 1
         assert any("No projects found" in e.reason for e in app.state.errors)
 
-    @patch("pykanban.store.Path.mkdir")
-    @patch("pykanban.store.QMessageBox.critical")
-    @patch("pykanban.store.sys.exit")
+    @patch("pykanban.project_manager.Path.mkdir")
+    @patch("pykanban.project_manager.QMessageBox.critical")
+    @patch("pykanban.project_manager.sys.exit")
     def test_startup_scan_permission_error_and_exists(
         self,
         mock_exit,
@@ -227,63 +228,36 @@ class TestProjectManagerStartupScan:
         assert conflict_file.name in str(conflict_warnings[0].path)
 
 
-class TestGetColumn:
-    """Unit tests for get_column."""
+class TestProjectManagerRenameProject:
+    """Unit tests for KanbanApp.rename_project."""
 
-    def _store(self, tasks: list[Task]) -> TaskStore:
-        s = TaskStore()
-        for t in tasks:
-            s.put(t)
-        return s
+    def test_updates_title_in_store(self, app: KanbanApp) -> None:
+        proj = app.create_project("Old Title", "desc")
+        app.rename_project(proj.project_id, "New Title")
+        assert app.get_project(proj.project_id).title == "New Title"
 
-    def test_returns_tasks_in_column_order(self) -> None:
-        """Preserves the ordering defined in project.column_order."""
-        t1 = make_task(id="t1", status=Status.TODO)
-        t2 = make_task(id="t2", status=Status.TODO)
-        proj = make_project(
-            Path("/fake"),
-            column_order={
-                "todo": ["t2", "t1"],
-                "backlog": [],
-                "doing": [],
-                "done": [],
-            },
-        )
-        result = get_column(proj, Status.TODO, self._store([t1, t2]))
-        assert [t.id for t in result] == ["t2", "t1"]
+    def test_updates_path_on_disk(self, app: KanbanApp) -> None:
+        proj = app.create_project("Disk Title", "desc")
+        old_path = proj.folder_path
+        app.rename_project(proj.project_id, "Renamed Disk Title")
+        new_path = app.get_project(proj.project_id).folder_path
+        assert not old_path.exists()
+        assert new_path.exists()
+        assert "renamed-disk-title" in str(new_path)
 
-    def test_skips_ids_missing_from_store(self) -> None:
-        """Silently ignores task IDs that are not in the task store."""
-        t1 = make_task(id="t1", status=Status.TODO)
-        proj = make_project(
-            Path("/fake"),
-            column_order={
-                "todo": ["t1", "ghost"],
-                "backlog": [],
-                "doing": [],
-                "done": [],
-            },
-        )
-        result = get_column(proj, Status.TODO, self._store([t1]))
-        assert len(result) == 1 and result[0].id == "t1"
+    def test_updates_title_in_metadata_yml(self, app: KanbanApp) -> None:
+        proj = app.create_project("Meta Title", "desc")
+        app.rename_project(proj.project_id, "Renamed Meta Title")
 
-    def test_skips_tasks_with_wrong_status(self) -> None:
-        """Excludes tasks whose .status does not match the requested column."""
-        t1 = make_task(id="t1", status=Status.DOING)
-        proj = make_project(
-            Path("/fake"),
-            column_order={
-                "todo": ["t1"],
-                "backlog": [],
-                "doing": [],
-                "done": [],
-            },
-        )
-        result = get_column(proj, Status.TODO, self._store([t1]))
-        assert result == []
+        # reload project from disk to verify metadata.yml was updated
+        reloaded = Project.from_file(proj.folder_path / "metadata.yml")
+        assert reloaded.title == "Renamed Meta Title"
 
-    def test_returns_empty_for_empty_column(self) -> None:
-        """Returns [] when no task IDs are registered in the column."""
-        proj = make_project(Path("/fake"))
-        result = get_column(proj, Status.BACKLOG, self._store([]))
-        assert result == []
+    def test_prevent_duplicate_titles_on_rename(self, app: KanbanApp) -> None:
+        """Does not allow renaming a project to have the same title as another existing project."""
+        p1 = app.create_project("Learn Bash", "desc")
+        p2 = app.create_project("Learn Python", "desc")
+
+        # error_banner show the error instead of raising to avoid crash
+        app.rename_project(p2.project_id, "Learn Bash")
+        assert any("already exists" in e.reason for e in app.state.errors)

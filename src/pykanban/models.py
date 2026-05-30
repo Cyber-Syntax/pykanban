@@ -9,11 +9,11 @@ from io import StringIO
 from typing import TYPE_CHECKING
 
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.error import YAMLError
-from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 from pykanban import file_handler
+from pykanban.error import ParseError
+from pykanban.utils import flow_id_list
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,26 +23,6 @@ if TYPE_CHECKING:
 # ruamel.yaml is used to preserve the order of fields in the YAML front matter
 # ruamel.yaml use typ="safe" default when not specified
 yaml = YAML()
-
-
-def _flow_id_list(ids: list[str]) -> CommentedSeq:
-    """Return a flow-style YAML sequence of single-quoted task ID strings.
-
-    Two problems are solved here:
-        - Flow style: renders as [id, id] instead of block "- id" lines.
-        - Signle-quoted strings: prevents ruamel/YAML 1.1 from casting IDs that
-        look like numbers (e.g. "0e532197" → float 0.0) back to non-string
-        types on the next load.
-
-    Args:
-        ids: Task ID strings to wrap.
-
-    Returns:
-        A CommentedSeq configured for flow-style output.1
-    """
-    seq = CommentedSeq([SingleQuotedScalarString(i) for i in ids])
-    seq.fa.set_flow_style()
-    return seq
 
 
 class Status(Enum):
@@ -62,22 +42,6 @@ class Priority(Enum):
     LOW = "low"
 
 
-@dataclass
-class ParseError:
-    """Error parsing a task."""
-
-    path: Path
-    reason: str
-
-
-@dataclass(frozen=True)
-class ConflictWarning:
-    """Sync-conflict warning surfaced in the UI."""
-
-    path: Path
-    reason: str = "Sync conflict detected"
-
-
 # TODO: refactor god object Task and Project into separate parsing and data classes, e.g. TaskData + TaskParser
 @dataclass
 class Task:
@@ -93,6 +57,7 @@ class Task:
     updated: datetime
 
     # NOTE: error_banner currently show the error when this schema wrong
+    # TODO: add google style docstrings
     # TODO: seperate validation to another function
     # similar function validation also work for projects too
     # maybe we could do one function to validate both?
@@ -306,7 +271,7 @@ class Project:
             "archived": self.archived,
             # each list is flow-style + quoted to prevent yaml 1.1 type coercion
             "column_order": {
-                status: _flow_id_list(ids)
+                status: flow_id_list(ids)
                 for status, ids in self.column_order.items()
             },
         }

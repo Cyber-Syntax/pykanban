@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime
 from pathlib import Path
 
-from pykanban.models import Priority, Project, Status, Task
+import pytest
+
+from pykanban.app import KanbanApp
 from pykanban.config import Settings
-from pykanban.store import KanbanApp
+from pykanban.models import Priority, Project, Status, Task
 
 
 def make_project(folder_path: Path, **overrides) -> Project:

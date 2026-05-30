@@ -1,37 +1,72 @@
 """Tests for the main window UI logic."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
+from pykanban.app import KanbanApp
+from pykanban.error import ParseError
 from pykanban.models import Project
-from pykanban.store import KanbanApp
 from pykanban.ui.main_window import MainWindow
 
 
-def test_main_window_create_project_does_not_crash(mocker):
+@pytest.fixture
+def mock_app():
+    """Fixture for creating a mock KanbanApp instance with sane defaults for UI tests."""
+    mock_app = MagicMock(spec=KanbanApp)
+
+    # Basic attrs MainWindow expects during __init__/_initial_load()
+    mock_app.projects = MagicMock()
+    mock_app.state = MagicMock()
+    mock_app.state.projects = MagicMock()
+    mock_app.state.projects.active_project_id = None
+    mock_app.state.errors = []
+
+    # Default board used by _refresh_from_state()
+    mock_board = MagicMock()
+    mock_board.columns = {}
+    mock_app.get_board.return_value = mock_board
+
+    # Provide a stable "created project" object so create_project().project_id is predictable
+    created_project = MagicMock()
+    created_project.project_id = "test-project-123"
+    created_project.title = "Test Project"
+    created_project.archived = False
+    mock_app.projects.create_project.return_value = created_project
+
+    # Sidebar and project helpers that tests often override per-case
+    mock_app.projects_list = []
+    mock_app.switch_project = MagicMock()
+    mock_app.projects.rename_project = MagicMock()
+    mock_app.projects.startup_scan = MagicMock()
+
+    return mock_app
+
+
+@pytest.fixture
+def mock_project():
+    """Fixture for creating a mock Project instance."""
+    mock_project = MagicMock(spec=Project)
+    mock_project.project_id = "test-project-123"
+    mock_project.title = "Test Project"
+    mock_project.archived = False
+    return mock_project
+
+
+def test_main_window_create_project_does_not_crash(
+    mock_app, mock_project, mocker
+):
     """Test that creating a project successfully updates the UI without crashing.
 
     This guards against regression of the bug where switch_project returning None
     would crash the KanBan board's refresh routine.
 
     Args:
+        mock_app: A MagicMock instance of KanbanApp with necessary attributes mocked.
+        mock_project: A MagicMock instance of Project with necessary attributes mocked.
         mocker: pytest-mock fixture for patching dependencies.
     """
-    # Arrange
-    # Create the top-level app context
-    mock_app = MagicMock(spec=KanbanApp)
-    
-    # Explicitly mock instance attributes that spec=KanbanApp misses
-    mock_app.projects = MagicMock()
-    mock_app.state = MagicMock()
-    mock_app.state.projects = MagicMock()
-
-    # Build a mock project to return when a new project is created
-    mock_project = MagicMock(spec=Project)
-    mock_project.project_id = "test-project-123"
-    mock_project.title = "New Project"
-    mock_project.archived = False
-    mock_app.projects.create_project.return_value = mock_project
-
     # Needed by sidebar.refresh() after active project switches
     mock_app.projects_list = [mock_project]
 
@@ -78,3 +113,104 @@ def test_main_window_create_project_does_not_crash(mocker):
     # Asserts that the new process accesses `self.app.get_board()` correctly
     # instead of passing in a bad internal variable to KanbanBoard's internal refresh.
     mock_app.get_board.assert_called_once()
+
+
+def test_main_window_rename_project_refreshes_board(mock_app, mocker) -> None:
+    """Renaming a project should refresh the main window state.
+
+    This guards against the bug where the side bar update but the error
+    banner stayed stale until another ui action occured.
+    """
+    # Build a mock project to return when a project is fetched
+    mock_project = MagicMock(spec=Project)
+    mock_project.project_id = "test-project-123"
+    mock_project.title = "Existing Project"
+    mock_project.archived = False
+    mock_app.get_project.return_value = mock_project
+
+    # State flags required for rendering UI transitions
+    mock_app.state.projects.active_project_id = "test-project-123"
+    mock_app.state.errors = []
+
+    # Mock PySide6 Dialogs so they simulate a user filling in the new title
+    # and don't natively block test execution.
+    mocker.patch(
+        "pykanban.ui.main_window.QInputDialog.getText",
+        return_value=("Renamed Project", True),
+    )
+
+    window = MainWindow(mock_app)
+
+    # Reset call counts after initialization so we only verify calls from _rename_project()
+    mock_app.projects.rename_project.reset_mock()
+    mock_app.get_board.reset_mock()
+
+    # Act
+    window._rename_project("test-project-123")
+
+    # Assert
+    # Ensure the rename method was called with the new title from the dialog
+    mock_app.projects.rename_project.assert_called_once_with(
+        "test-project-123", "Renamed Project"
+    )
+
+    # Ensure get_board is called to refresh the board state after renaming
+    mock_app.get_board.assert_called_once()
+
+
+def test_rename_project_shows_error_banner_immediately(mock_app, mocker):
+    """When rename produces an error, MainWindow must refresh and show the banner immediately."""
+    mock_project = MagicMock(spec=Project)
+    mock_project.project_id = "p1"
+    mock_project.title = "Old"
+    mock_project.archived = False
+    mock_app.get_project.return_value = mock_project
+
+    mock_app.state.projects.active_project_id = "p1"
+    mock_app.state.errors = []
+
+    mocker.patch(
+        "pykanban.ui.main_window.QInputDialog.getText",
+        return_value=("New Title", True),
+    )
+
+    window = MainWindow(mock_app)
+
+    # Make the rename operation append a ParseError into state.errors
+    def fake_rename(pid, title):
+        mock_app.state.errors.append(
+            ParseError(path=Path("conflict.md"), reason="conflict")
+        )
+
+    mock_app.projects.rename_project.side_effect = fake_rename
+
+    spy = mocker.spy(window.error_banner, "set_errors")
+    window._rename_project("p1")
+
+    # ensure the banner was refreshed with the app state errors
+    spy.assert_called()
+    assert spy.call_args[0][0] is mock_app.state.errors
+    assert isinstance(mock_app.state.errors[0], ParseError)
+
+
+# TODO: write tests for unarchive and switch project,delete task
+
+# rename_project if not exist?
+# rename_project with empty title?
+# rename_project with same title as another project?
+# create_project with empty title?
+# create_project with same title as another project?
+# unarchive_project that doesn't exist?
+# unarchive_project that isn't archived?
+# switch_project that doesn't exist?
+# switch_project with unsaved changes in the editor?
+# delete_task that doesn't exist?
+# delete_task with unsaved changes in the editor?
+# delete_task that is currently being edited?
+# delete_task that is in a different project than the active one?
+# delete_task that is in the active project but not currently visible on the board?
+# delete_task that is in the active project and currently visible on the board?
+
+# need to cover for all of them for extarnal file changes:
+# might be lose by user deleted the file via neovim or terminal while our
+# app is running.

@@ -18,8 +18,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pykanban.app import KanbanApp
 from pykanban.models import Priority, Status, Task
-from pykanban.store import AppState, KanbanApp
+
+# TODO: debounce is little clunky
+# decrease the debounce which neovim/obsidian and similar apps
+# make it so much faster like in seconds, you can see the changes in
+# other apps immediately, but in pykanban it waits for 800ms of inactivity before saving
+
+# FIXME: currently editor can't be able to handle so fast changes, when I change the title
+# but fastly click to another task, the title change is not saved,
+# because the editor is already closed and the task reference is cleared
+# so we need a proper logic to handle this case,
+# we must save the changes even if the editor close so fast or changed to another task
+# we might need to use thread or async to handle the saving process,
+# so it can run in background and not block the UI
 
 
 class TaskEditorPanel(QWidget):
@@ -27,9 +40,7 @@ class TaskEditorPanel(QWidget):
 
     task_saved = Signal()
 
-    def __init__(
-        self, app: KanbanApp, parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, app: KanbanApp, parent: QWidget | None = None) -> None:
         """Initialize the editor panel.
 
         Args:

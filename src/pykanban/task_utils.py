@@ -1,30 +1,13 @@
-"""Board logic functions for managing task columns and file paths."""
+"""TaskManager utility functions for managing task columns and file paths."""
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+from pykanban.utils import slugify
 
-def slugify(value: str) -> str:
-    """Create a filesystem-safe slug from a title.
-
-    Args:
-        value: The string to slugify.
-
-    Returns:
-        A URL-friendly string safe for file paths
-        so user can use markdown linking.
-    """
-    # TODO:write tests
-    # if a callable (e.g a method) is passed, call it to get the value
-    if callable(value):
-        value = value()
-
-    # ensure we realy have a string now
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
-    slug = slug.strip("-")
-    return slug or "project"
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def build_task_file_path(
