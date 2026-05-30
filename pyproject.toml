@@ -35,6 +35,7 @@ dev = [
   "python-lsp-server[all]>=1.14.0",
   "pylsp-mypy>=0.7.1",
   "memray>=1.19.3",
+  "hypothesis>=6.155.0",
 ]
 lint = ["ruff"]
 
