@@ -158,7 +158,6 @@ class TestSlugify:
             )
 
 
-# TODO: make class-based tests for generate_task_id and generate_project_id to avoid repetition
 class TestGenerateTaskId:
     def test_generate_task_id_returns_string(self):
         """generate_task_id should return a string."""

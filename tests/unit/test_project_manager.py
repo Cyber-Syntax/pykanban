@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 from pykanban.app import KanbanApp
 from pykanban.config import Settings
 from pykanban.error import ConflictWarning, ParseError
+from pykanban.exceptions import WriteError
 from pykanban.models import Project, Status, Task
 from pykanban.project_manager import scan_project_folder
-from pykanban.store import BoardView
 from tests.unit.conftest import make_project, make_task
 
 if TYPE_CHECKING:
@@ -321,6 +322,97 @@ class TestProjectManagerArchiveProject:
         assert archived_project.folder_path.exists()
         assert "archive" in str(archived_project.folder_path)
 
+    def test_records_error_when_move_fails(
+        self,
+        app_with_active_project: KanbanApp,
+        monkeypatch,
+    ) -> None:
+        project = app_with_active_project.get_active_project()
+
+        def raise_oserror(*args, **kwargs):
+            raise OSError("move failed")
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.shutil.move",
+            raise_oserror,
+        )
+
+        app_with_active_project.archive_project(project.project_id)
+
+        assert len(app_with_active_project.state.errors) == 1
+
+        error = app_with_active_project.state.errors[0]
+        assert isinstance(error, ParseError)
+        assert error.reason == "move failed"
+
+    def test_records_error_when_project_write_fails(
+        self,
+        app_with_active_project: KanbanApp,
+        monkeypatch,
+    ) -> None:
+        project = app_with_active_project.get_active_project()
+
+        def raise_write_error() -> None:
+            raise WriteError(
+                path=project.folder_path,
+                reason="write failed",
+            )
+
+        monkeypatch.setattr(
+            project,
+            "write",
+            raise_write_error,
+        )
+
+        app_with_active_project.archive_project(project.project_id)
+
+        assert len(app_with_active_project.state.errors) == 1
+
+        error = app_with_active_project.state.errors[0]
+        assert isinstance(error, ParseError)
+        assert error.reason == "write failed"
+
+    def test_clears_task_store_when_archiving_active_project(
+        self,
+        app_with_active_project: KanbanApp,
+    ) -> None:
+        project = app_with_active_project.get_active_project()
+
+        task = make_task(id="t1", status=Status.TODO)
+        app_with_active_project.state.tasks.put(task)
+
+        assert "t1" in app_with_active_project.state.tasks.tasks_by_id
+
+        app_with_active_project.archive_project(project.project_id)
+
+        assert app_with_active_project.state.tasks.tasks_by_id == {}
+
+    def test_does_not_clear_tasks_when_archiving_inactive_project(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+
+        app = KanbanApp(settings)
+
+        for pid, slug in [("p1", "proj1"), ("p2", "proj2")]:
+            folder = settings.projects_dir / slug
+            folder.mkdir()
+
+            project = make_project(folder, project_id=pid)
+            project.write()
+            app.put_project(project)
+
+        app.set_active_project("p1")
+
+        task = make_task(id="t1", status=Status.TODO)
+        app.state.tasks.put(task)
+
+        app.archive_project("p2")
+
+        assert "t1" in app.state.tasks.tasks_by_id
+
 
 class TestProjectManagerUnarchiveProject:
     """Unit tests for KanbanApp.unarchive_project."""
@@ -342,19 +434,94 @@ class TestProjectManagerUnarchiveProject:
         proj = app_with_active_project.get_project(project_id)
         assert "archive" not in str(proj.folder_path)
 
+    def test_records_error_when_move_fails(
+        self,
+        app_with_active_project: KanbanApp,
+        monkeypatch,
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.archive_project(project_id)
+
+        def raise_oserror(*args, **kwargs):
+            raise OSError("move failed")
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.shutil.move",
+            raise_oserror,
+        )
+
+        app_with_active_project.unarchive_project(project_id)
+
+        assert len(app_with_active_project.state.errors) == 1
+
+        error = app_with_active_project.state.errors[0]
+        assert isinstance(error, ParseError)
+        assert error.reason == "move failed"
+
+    def test_records_error_when_project_write_fails(
+        self,
+        app_with_active_project: KanbanApp,
+        monkeypatch,
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.archive_project(project_id)
+
+        project = app_with_active_project.get_project(project_id)
+
+        def raise_write_error():
+            raise WriteError(
+                path=project.folder_path,
+                reason="write failed",
+            )
+
+        monkeypatch.setattr(project, "write", raise_write_error)
+
+        app_with_active_project.unarchive_project(project_id)
+
+        assert len(app_with_active_project.state.errors) == 1
+
+        error = app_with_active_project.state.errors[0]
+        assert isinstance(error, ParseError)
+        assert error.reason == "write failed"
+
+    def test_updates_folder_path_after_unarchive(
+        self,
+        app_with_active_project: KanbanApp,
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+
+        app_with_active_project.archive_project(project_id)
+        app_with_active_project.unarchive_project(project_id)
+
+        project = app_with_active_project.get_project(project_id)
+
+        expected = (
+            app_with_active_project.state.settings.projects_dir
+            / project.folder_path.name
+        )
+
+        assert project.folder_path == expected
+
+    def test_updates_timestamp_after_unarchive(
+        self,
+        app_with_active_project: KanbanApp,
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+
+        app_with_active_project.archive_project(project_id)
+
+        project = app_with_active_project.get_project(project_id)
+        original_updated = project.updated
+
+        app_with_active_project.unarchive_project(project_id)
+
+        assert project.updated > original_updated
+
 
 class TestProjectManagerDeleteProject:
     """Unit tests for KanbanApp.delete_project."""
 
     def test_removes_project_from_store(
-        self, app_with_active_project: KanbanApp
-    ) -> None:
-        project_id = app_with_active_project.get_active_project().project_id
-        app_with_active_project.delete_project(project_id)
-        with pytest.raises(KeyError):
-            app_with_active_project.get_project(project_id)
-
-    def test_clears_active_project_id(
         self, app_with_active_project: KanbanApp
     ) -> None:
         project_id = app_with_active_project.get_active_project().project_id
@@ -371,48 +538,363 @@ class TestProjectManagerDeleteProject:
         app_with_active_project.delete_project(project_id)
         assert not folder.exists()
 
-
-class TestProjectManagerSwitchProject:
-    """Unit tests for KanbanApp.switch_project."""
-
-    def test_switch_updates_active_project(self, tmp_path: Path) -> None:
-        """After switching, get_active() returns the newly selected project."""
+    def test_delete_inactive_project_does_not_affect_active_state(
+        self,
+        tmp_path: Path,
+    ) -> None:
         settings = Settings(projects_dir=tmp_path / "projects")
         settings.projects_dir.mkdir(parents=True)
+
         app = KanbanApp(settings)
 
-        for pid, slug in [("p_aaa00001", "proj-a"), ("p_bbb00002", "proj-b")]:
+        # create 2 projects
+        for pid, slug in [("p1", "a"), ("p2", "b")]:
             folder = settings.projects_dir / slug
             folder.mkdir()
-            proj = make_project(folder, project_id=pid)
-            proj.write()
-            app.put_project(proj)
 
-        app.set_active_project("p_aaa00001")
-        app.switch_project("p_bbb00002")
+            project = make_project(folder, project_id=pid)
+            project.write()
+            app.put_project(project)
 
-        assert app.get_active_project().project_id == "p_bbb00002"
+        app.set_active_project("p1")
 
-    def test_switch_returns_board_view(self, tmp_path: Path) -> None:
+        app.delete_project("p2")
+
+        assert app.get_active_project().project_id == "p1"
+
+    def test_does_not_clear_tasks_when_deleting_inactive_project(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+
+        app = KanbanApp(settings)
+
+        for pid, slug in [("p1", "proj1"), ("p2", "proj2")]:
+            folder = settings.projects_dir / slug
+            folder.mkdir()
+
+            project = make_project(folder, project_id=pid)
+            project.write()
+            app.put_project(project)
+
+        app.set_active_project("p1")
+
+        task = make_task(id="t1", status=Status.TODO)
+        app.state.tasks.put(task)
+
+        app.delete_project("p2")
+
+        assert "t1" in app.state.tasks.tasks_by_id
+
+    def test_clears_task_store_when_deleting_active_project(
+        self,
+        app_with_active_project: KanbanApp,
+    ) -> None:
+        task = make_task(id="t1", status=Status.TODO)
+        app_with_active_project.state.tasks.put(task)
+
+        project_id = app_with_active_project.get_active_project().project_id
+
+        app_with_active_project.delete_project(project_id)
+
+        assert app_with_active_project.state.tasks.tasks_by_id == {}
+
+    def test_clears_active_project_when_deleted(
+        self,
+        app_with_active_project: KanbanApp,
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+
+        app_with_active_project.delete_project(project_id)
+
+        with pytest.raises(KeyError):
+            app_with_active_project.get_active_project()
+
+    def test_records_error_when_delete_fails(
+        self,
+        app_with_active_project: KanbanApp,
+        monkeypatch,
+    ) -> None:
+        project = app_with_active_project.get_active_project()
+
+        def raise_oserror(*args, **kwargs):
+            raise OSError("delete failed")
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.shutil.rmtree",
+            raise_oserror,
+        )
+
+        app_with_active_project.delete_project(project.project_id)
+
+        assert len(app_with_active_project.state.errors) == 1
+
+        error = app_with_active_project.state.errors[0]
+        assert isinstance(error, ParseError)
+        assert error.reason == "delete failed"
+
+    def test_switches_to_replacement_project_when_active_deleted(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+
+        app = KanbanApp(settings)
+
+        # active project (will be deleted)
+        active = make_project(settings.projects_dir / "a", project_id="p1")
+        active.write()
+        app.put_project(active)
+
+        # replacement project
+        replacement = make_project(
+            settings.projects_dir / "b", project_id="p2"
+        )
+        replacement.write()
+        app.put_project(replacement)
+
+        app.set_active_project("p1")
+
+        app.delete_project("p1")
+
+        assert app.get_active_project().project_id == "p2"
+
+    def test_clears_state_when_no_replacement_project_exists(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+
+        app = KanbanApp(settings)
+
+        project = make_project(settings.projects_dir / "a", project_id="p1")
+        project.write()
+        app.put_project(project)
+
+        app.set_active_project("p1")
+
+        app.delete_project("p1")
+
+        with pytest.raises(KeyError):
+            app.get_active_project()
+
+        assert app.state.tasks.tasks_by_id == {}
+
+    def test_falls_back_when_switch_project_fails(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+
+        app = KanbanApp(settings)
+
+        active = make_project(settings.projects_dir / "a", project_id="p1")
+        active.write()
+        app.put_project(active)
+
+        replacement = make_project(
+            settings.projects_dir / "b", project_id="p2"
+        )
+        replacement.write()
+        app.put_project(replacement)
+
+        app.set_active_project("p1")
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.ProjectManager.switch_project",
+            lambda self, *_: (_ for _ in ()).throw(Exception("boom")),
+        )
+        app.delete_project("p1")
+
+        # # error banner show error instead of raising to avoid crash
+        assert len(app.state.errors) > 0
+        assert any(
+            "Projects deleted was active." in e.reason
+            for e in app.state.errors
+        )
+
+        assert app.state.tasks.tasks_by_id == {}
+
+    def test_delete_nonexistent_project_is_noop(self, app: KanbanApp) -> None:
+        before_projects = dict(app.state.projects.projects_by_id)
+        before_tasks = dict(app.state.tasks.tasks_by_id)
+        before_errors = list(app.state.errors)
+
+        app.delete_project("does-not-exist")
+
+        assert app.state.projects.projects_by_id == before_projects
+        assert app.state.tasks.tasks_by_id == before_tasks
+        assert app.state.errors == before_errors
+
+
+class TestProjectManagerSwitchProject:
+    def test_loads_changed_tasks(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
         settings = Settings(projects_dir=tmp_path / "projects")
         settings.projects_dir.mkdir(parents=True)
         app = KanbanApp(settings)
 
         folder = settings.projects_dir / "proj"
         folder.mkdir()
-        proj = make_project(folder, project_id="p_switch01")
-        proj.write()
-        app.put_project(proj)
 
-        # switch_project returns None directly
-        app.switch_project("p_switch01")
-        # obtain board view from KanbanApp facade
-        board = app.get_board()
-        # verify it's a BoardView instance (not just None or some other type)
-        assert isinstance(board, BoardView)
+        project = make_project(folder, project_id="p1")
+        project.write()
+        app.put_project(project)
 
+        task = make_task(id="t1", status=Status.TODO)
 
-# ── store: scan_project_folder ────────────────────────────────────────────────
+        scan = Mock()
+        scan.changed_paths = [Path("task1.md")]
+        scan.deleted_paths = []
+        scan.conflict_paths = []
+        scan.mtime_cache = {"foo": 123}
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.scan_project_folder",
+            lambda *args, **kwargs: scan,
+        )
+        monkeypatch.setattr(
+            Task,
+            "from_file",
+            lambda path: task,
+        )
+
+        app.switch_project("p1")
+
+        assert "t1" in app.state.tasks.tasks_by_id
+        assert app.state.scan_mtime_cache == {"foo": 123}
+
+    def test_records_parse_errors(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+        app = KanbanApp(settings)
+
+        folder = settings.projects_dir / "proj"
+        folder.mkdir()
+
+        project = make_project(folder, project_id="p1")
+        project.write()
+        app.put_project(project)
+
+        parse_error = ParseError(
+            path=Path("bad.md"),
+            reason="invalid task",
+        )
+
+        scan = Mock()
+        scan.changed_paths = [Path("bad.md")]
+        scan.deleted_paths = []
+        scan.conflict_paths = []
+        scan.mtime_cache = {}
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.scan_project_folder",
+            lambda *args, **kwargs: scan,
+        )
+        monkeypatch.setattr(
+            Task,
+            "from_file",
+            lambda path: parse_error,
+        )
+
+        app.switch_project("p1")
+
+        assert parse_error in app.state.errors
+        assert len(app.state.tasks.tasks_by_id) == 0
+
+    def test_records_conflict_warnings(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+        app = KanbanApp(settings)
+
+        folder = settings.projects_dir / "proj"
+        folder.mkdir()
+
+        project = make_project(folder, project_id="p1")
+        project.write()
+        app.put_project(project)
+
+        conflict_path = Path("duplicate.md")
+
+        scan = Mock()
+        scan.changed_paths = []
+        scan.deleted_paths = []
+        scan.conflict_paths = [conflict_path]
+        scan.mtime_cache = {}
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.scan_project_folder",
+            lambda *args, **kwargs: scan,
+        )
+
+        app.switch_project("p1")
+
+        assert any(
+            isinstance(err, ConflictWarning) and err.path == conflict_path
+            for err in app.state.errors
+        )
+
+    def test_reconcile_order_called_with_loaded_task_ids(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+        app = KanbanApp(settings)
+
+        folder = settings.projects_dir / "proj"
+        folder.mkdir()
+
+        project = make_project(folder, project_id="p1")
+        project.write()
+        project.reconcile_order = Mock()
+
+        app.put_project(project)
+
+        task = Mock(spec=Task)
+        task.id = "t123"
+        task.status = Status.TODO
+
+        scan = Mock()
+        scan.changed_paths = [Path("task.md")]
+        scan.deleted_paths = [Path("deleted.md")]  # exercise deleted branch
+        scan.conflict_paths = []
+        scan.mtime_cache = {}
+
+        monkeypatch.setattr(
+            "pykanban.project_manager.scan_project_folder",
+            lambda *args, **kwargs: scan,
+        )
+        monkeypatch.setattr(
+            Task,
+            "from_file",
+            lambda path: task,
+        )
+
+        app.switch_project("p1")
+
+        project.reconcile_order.assert_called_once()
+
+        task_ids = project.reconcile_order.call_args.args[0]
+        assert task_ids == {"t123"}
 
 
 class TestScanProjectFolder:
