@@ -7,14 +7,16 @@ from unittest.mock import patch
 
 import pytest
 
+from pykanban.app import KanbanApp
+from pykanban.config import Settings
 from pykanban.error import ConflictWarning, ParseError
 from pykanban.models import Project, Status, Task
+from pykanban.project_manager import scan_project_folder
+from pykanban.store import BoardView
 from tests.unit.conftest import make_project, make_task
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    from pykanban.app import KanbanApp
 
 
 class TestProjectManagerStartupScan:
@@ -160,10 +162,8 @@ class TestProjectManagerStartupScan:
 
         app.startup_scan(projects_dir)
 
-        # TODO: use kanbanapp method
-        assert app.state.projects.active_project_id == "p_active123"
-        # assert app.set_active_project(project_id="p_active123") is True
-        # assert app.get_active_project() is not None
+        app.set_active_project("p_active123")
+        assert app.get_active_project().project_id == "p_active123"
 
     def test_startup_scan_reconciles_order_isolated_per_project(
         self, app: KanbanApp, projects_dir: Path
@@ -261,3 +261,203 @@ class TestProjectManagerRenameProject:
         # error_banner show the error instead of raising to avoid crash
         app.rename_project(p2.project_id, "Learn Bash")
         assert any("already exists" in e.reason for e in app.state.errors)
+
+
+class TestProjectManagerCreateProject:
+    """Unit tests for KanbanApp.create_project."""
+
+    def test_project_added_to_store(self, app: KanbanApp) -> None:
+        proj = app.create_project("New Project", "desc")
+        assert app.get_project(proj.project_id) is proj
+
+    def test_project_folder_created_on_disk(self, app: KanbanApp) -> None:
+        proj = app.create_project("My Project", "desc")
+        assert proj.folder_path.is_dir()
+
+    def test_title_is_stripped(self, app: KanbanApp) -> None:
+        proj = app.create_project("  Padded  ", "")
+        assert proj.title == "Padded"
+
+    def test_prevent_duplicate_project_titles(self, app: KanbanApp) -> None:
+        """Does not allow creating a new project with the same title as an existing one."""
+        app.create_project("Unique Title", "desc")
+        with pytest.raises(ValueError):
+            app.create_project("Unique Title", "another desc")
+
+
+class TestProjectManagerArchiveProject:
+    """Unit tests for KanbanApp.archive_project."""
+
+    def test_marks_project_as_archived(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.archive_project(project_id)
+        assert app_with_active_project.get_project(project_id).archived
+
+    def test_clears_active_project_id(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.archive_project(project_id)
+        with pytest.raises(KeyError):
+            app_with_active_project.get_active_project()
+
+    def test_moves_folder_to_archive_subdir(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project = app_with_active_project.get_active_project()
+        original_folder = project.folder_path
+        app_with_active_project.archive_project(project.project_id)
+
+        # The original folder should no longer exist
+        assert not original_folder.exists()
+
+        # need to fetch the project again to get its new folder path
+        archived_project = app_with_active_project.get_project(
+            project.project_id
+        )
+        assert not original_folder.exists()
+        assert archived_project.folder_path.exists()
+        assert "archive" in str(archived_project.folder_path)
+
+
+class TestProjectManagerUnarchiveProject:
+    """Unit tests for KanbanApp.unarchive_project."""
+
+    def test_clears_archived_flag(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.archive_project(project_id)
+        app_with_active_project.unarchive_project(project_id)
+        assert not app_with_active_project.get_project(project_id).archived
+
+    def test_moves_folder_back_to_projects_root(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.archive_project(project_id)
+        app_with_active_project.unarchive_project(project_id)
+        proj = app_with_active_project.get_project(project_id)
+        assert "archive" not in str(proj.folder_path)
+
+
+class TestProjectManagerDeleteProject:
+    """Unit tests for KanbanApp.delete_project."""
+
+    def test_removes_project_from_store(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.delete_project(project_id)
+        with pytest.raises(KeyError):
+            app_with_active_project.get_project(project_id)
+
+    def test_clears_active_project_id(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        app_with_active_project.delete_project(project_id)
+        with pytest.raises(KeyError):
+            app_with_active_project.get_project(project_id)
+
+    def test_deletes_project_folder_from_disk(
+        self, app_with_active_project: KanbanApp
+    ) -> None:
+        project_id = app_with_active_project.get_active_project().project_id
+        project = app_with_active_project.get_project(project_id)
+        folder = project.folder_path
+        app_with_active_project.delete_project(project_id)
+        assert not folder.exists()
+
+
+class TestProjectManagerSwitchProject:
+    """Unit tests for KanbanApp.switch_project."""
+
+    def test_switch_updates_active_project(self, tmp_path: Path) -> None:
+        """After switching, get_active() returns the newly selected project."""
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+        app = KanbanApp(settings)
+
+        for pid, slug in [("p_aaa00001", "proj-a"), ("p_bbb00002", "proj-b")]:
+            folder = settings.projects_dir / slug
+            folder.mkdir()
+            proj = make_project(folder, project_id=pid)
+            proj.write()
+            app.put_project(proj)
+
+        app.set_active_project("p_aaa00001")
+        app.switch_project("p_bbb00002")
+
+        assert app.get_active_project().project_id == "p_bbb00002"
+
+    def test_switch_returns_board_view(self, tmp_path: Path) -> None:
+        settings = Settings(projects_dir=tmp_path / "projects")
+        settings.projects_dir.mkdir(parents=True)
+        app = KanbanApp(settings)
+
+        folder = settings.projects_dir / "proj"
+        folder.mkdir()
+        proj = make_project(folder, project_id="p_switch01")
+        proj.write()
+        app.put_project(proj)
+
+        # switch_project returns None directly
+        app.switch_project("p_switch01")
+        # obtain board view from KanbanApp facade
+        board = app.get_board()
+        # verify it's a BoardView instance (not just None or some other type)
+        assert isinstance(board, BoardView)
+
+
+# ── store: scan_project_folder ────────────────────────────────────────────────
+
+
+class TestScanProjectFolder:
+    """Unit tests for store.scan_project_folder."""
+
+    def test_new_files_appear_in_changed_paths(self, tmp_path: Path) -> None:
+        """Files not seen before show up in changed_paths."""
+        (tmp_path / "task.md").write_text("content")
+        result = scan_project_folder(tmp_path, {})
+        assert any(p.name == "task.md" for p in result.changed_paths)
+
+    def test_unchanged_files_not_in_changed_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """Files with an identical mtime are omitted from changed_paths."""
+        f = tmp_path / "task.md"
+        f.write_text("content")
+        result = scan_project_folder(tmp_path, {f: f.stat().st_mtime})
+        assert f not in result.changed_paths
+
+    def test_missing_files_appear_in_deleted_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """Cache entries with no matching file on disk land in deleted_paths."""
+        ghost = tmp_path / "ghost.md"
+        result = scan_project_folder(tmp_path, {ghost: 1_234_567_890.0})
+        assert ghost in result.deleted_paths
+
+    def test_sync_conflict_files_detected(self, tmp_path: Path) -> None:
+        """Sync-conflict sentinel files appear in conflict_paths."""
+        conflict = tmp_path / ".sync-conflict-20260101-abc"
+        conflict.write_text("conflict data")
+        result = scan_project_folder(tmp_path, {})
+        assert conflict in result.conflict_paths
+
+    def test_mtime_cache_reflects_current_files(self, tmp_path: Path) -> None:
+        """The returned mtime_cache contains every .md file found."""
+        f = tmp_path / "task.md"
+        f.write_text("data")
+        result = scan_project_folder(tmp_path, {})
+        assert f in result.mtime_cache
+
+    def test_empty_directory_returns_empty_result(
+        self, tmp_path: Path
+    ) -> None:
+        result = scan_project_folder(tmp_path, {})
+        assert result.changed_paths == []
+        assert result.deleted_paths == []

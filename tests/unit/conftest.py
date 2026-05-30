@@ -58,3 +58,18 @@ def app(projects_dir: Path) -> KanbanApp:
     """Fixture that returns a KanbanApp initialized with an empty projects directory."""
     settings = Settings(projects_dir=projects_dir)
     return KanbanApp(settings)
+
+
+@pytest.fixture
+def app_with_active_project(tmp_path: Path) -> KanbanApp:
+    """KanbanApp with one active project pointing to a real temp directory."""
+    settings = Settings(projects_dir=tmp_path / "projects")
+    settings.projects_dir.mkdir(parents=True)
+    app = KanbanApp(settings)
+
+    proj_folder = settings.projects_dir / "test-project"
+    proj_folder.mkdir()
+    proj = make_project(proj_folder)
+    app.put_project(proj)
+    app.set_active_project(proj.project_id)
+    return app
