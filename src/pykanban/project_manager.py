@@ -286,16 +286,17 @@ class ProjectManager:
     def delete_project(self, project_id: str) -> None:
         """Permanently delete a project folder and remove it from the memory.
 
-        If the deleted project was the active one, the active project is
-        reset to None so the board renders and empty state rather than crashing
-        on the next get_board() call.
+        If the deleted project was the active one, choose another non-archived
+        project to activate and load its tasks. If switching to the replacement
+        fails, record an error and fall back to an empty state.
 
         Args:
             project_id: Project ID to delete.
         """
-        project = self.state.projects.projects_by_id[project_id]
+        project = self.state.projects.projects_by_id.get(project_id)
+        if project is None:
+            return
 
-        # TODO: write tests
         try:
             shutil.rmtree(str(project.folder_path))
         except OSError as e:
@@ -304,19 +305,41 @@ class ProjectManager:
             )
             return
 
-        # TODO: write tests
-        # drop the project and all its tasks from memory
+        # remove the project from memory
         del self.state.projects.projects_by_id[project_id]
-        for task_id in list(self.state.tasks.tasks_by_id):
-            if task_id in (
-                project.column_order.get(s, []) for s in project.column_order
-            ):
-                self.state.tasks.remove(task_id)
 
-        # clear active project if it was the one just deleted
-        if self.state.projects.active_project_id == project_id:
+        # if deleted project wasn't active, nothing else to do
+        if self.state.projects.active_project_id != project_id:
+            return
+
+        # find a non-archived replacement project
+        replacement = None
+        for p in self.state.projects.projects_by_id.values():
+            if not p.archived:
+                replacement = p
+                break
+
+        if replacement is not None:
+            try:
+                # Attempt to switch to the replacement (this may raise)
+                self.switch_project(replacement.project_id)
+            except Exception as e:
+                # Record the failure for the UI and clear state to a safe empty state
+                self.state.errors.append(
+                    ParseError(
+                        path=replacement.folder_path,
+                        reason=(
+                            f"Projects deleted was active. Failed to switch to replacement "
+                            f"project '{replacement.title}'. Error: {e}"
+                        ),
+                    )
+                )
+                self.state.projects.active_project_id = None
+                self.state.tasks.tasks_by_id.clear()
+        else:
+            # no non-archived projects left — clear active and tasks
             self.state.projects.active_project_id = None
-            self.state.tasks = TaskStore()
+            self.state.tasks.tasks_by_id.clear()
 
     def archive_project(self, project_id: str) -> None:
         """Archive a project by moving it to archive/.
@@ -334,7 +357,6 @@ class ProjectManager:
         archive_root.mkdir(parents=True, exist_ok=True)
 
         new_folder = archive_root / project.folder_path.name
-        # TODO: write tests
         try:
             shutil.move(str(project.folder_path), str(new_folder))
         except OSError as e:
@@ -347,7 +369,6 @@ class ProjectManager:
         project.archived = True
         project.updated = datetime.now()
 
-        # TODO: write tests
         try:
             project.write()
         except WriteError as e:
@@ -373,7 +394,6 @@ class ProjectManager:
             self.state.settings.projects_dir / project.folder_path.name
         )
 
-        # TODO: write tests
         try:
             shutil.move(str(archived_folder_path), str(project_folder_path))
         except OSError as e:
@@ -386,7 +406,6 @@ class ProjectManager:
         project.archived = False
         project.updated = datetime.now()
 
-        # TODO: write tests
         try:
             project.write()
         except WriteError as e:
@@ -411,7 +430,6 @@ class ProjectManager:
         )
         self.state.scan_mtime_cache = scan.mtime_cache
 
-        # TODO: write tests
         # Load changed tasks
         for path in scan.changed_paths:
             task = Task.from_file(path)
@@ -420,7 +438,6 @@ class ProjectManager:
                 continue
             self.state.tasks.put(task)
 
-        # TODO: write tests, handle edge case
         # Handle deleted tasks
         # Extract task_id from path if possible (for reconciliation)
         # Deleted paths no longer exist, so we just let reconcile_order clean them up
@@ -431,7 +448,6 @@ class ProjectManager:
             set(self.state.tasks.tasks_by_id.keys()), self.state.tasks
         )
 
-        # TODO: write tests
         # Record conflicts from scan result
         for path in scan.conflict_paths:
             self.state.errors.append(ConflictWarning(path=path))
