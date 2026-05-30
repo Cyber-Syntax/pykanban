@@ -104,7 +104,25 @@ class MainWindow(QMainWindow):
         self._refresh_from_state()
 
     def _open_task(self, task_id: str) -> None:
+        """Commit any open draft, then load the selected task.
+
+        Args:
+            task_id: The ID of the task to open.
+        """
+
+        # If the editor has an open task that is different from the one being
+        # selected, flush changes and clear the editor to avoid showing stale data.
+        current_task = self.editor._task
+        if current_task is not None and current_task.id != task_id:
+            self.editor.clear()
+
+        # if it doesn't exist, just clear the editor
         task = self.app.get_task(task_id)
+        if task is None:
+            self.editor.clear()
+            return
+
+        # load the new task into the editor
         self.editor.load_task(task)
 
     def _delete_task(self, task_id: str) -> None:
