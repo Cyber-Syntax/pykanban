@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.app import KanbanApp
+from pykanban.models import Status
+from pykanban.store import BoardView
 from pykanban.ui.error_banner import ErrorBanner
 from pykanban.ui.kanban_board import KanbanBoard
 from pykanban.ui.project_sidebar import ProjectSidebar
@@ -157,11 +159,14 @@ class MainWindow(QMainWindow):
         self._refresh_from_state()
 
     def _refresh_from_state(self) -> None:
-        """Refresh board from MemoryStateManager — no-op when no project is active yet."""
+        """Refresh board from MemoryStateManager."""
         if self.app.state.projects.active_project_id is None:
-            # Nothing to render; show empty banner state
-            self.error_banner.set_errors(self.app.state.errors)
+            # No active project: force an explicit empty board
+            # so we don't show stale data from the previously active project.
+            empty_board = BoardView(columns={status: [] for status in Status})
+            self._refresh_board(empty_board)
             return
+
         board = self.app.get_board()
         self._refresh_board(board)
 
