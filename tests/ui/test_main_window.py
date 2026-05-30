@@ -193,6 +193,78 @@ def test_rename_project_shows_error_banner_immediately(mock_app, mocker):
     assert isinstance(mock_app.state.errors[0], ParseError)
 
 
+def test_open_task_loads_existing_task_into_editor(mock_app, mocker):
+    """Opening a task should load it into the editor instead of clearing it."""
+    # Setup a mock task with expected attributes
+    mock_task = MagicMock()
+    mock_task.id = "t1"
+    mock_app.get_task.return_value = mock_task
+
+    window = MainWindow(mock_app)
+
+    load_task = mocker.patch.object(window.editor, "load_task")
+    clear = mocker.patch.object(window.editor, "clear")
+
+    window._open_task("t1")
+
+    # should load existing task, not clear editor
+    mock_app.get_task.assert_called_once_with("t1")
+    load_task.assert_called_once_with(mock_task)
+    clear.assert_not_called()
+
+
+def test_open_task_clears_previous_task_before_loading_new_task(
+    mock_app, mocker
+) -> None:
+    """Opening a task should clear the previous editor state before loading the new task.
+
+    This guards against the bug where user change so fast a task status/title
+    that the editor would load the new task on top of the old one without clearing,
+    ending with not updated status/title for that current task.
+    """
+    old_task = MagicMock()
+    old_task.id = "old-task"
+
+    new_task = MagicMock()
+    new_task.id = "new-task"
+    mock_app.get_task.return_value = new_task
+
+    window = MainWindow(mock_app)
+    window.editor._task = old_task
+
+    call_order: list[str] = []
+
+    def record_clear() -> None:
+        call_order.append("clear")
+
+    def record_load(task) -> None:
+        call_order.append(f"load:{task.id}")
+
+    mocker.patch.object(window.editor, "clear", side_effect=record_clear)
+    mocker.patch.object(window.editor, "load_task", side_effect=record_load)
+
+    window._open_task("new-task")
+
+    mock_app.get_task.assert_called_once_with("new-task")
+    assert call_order == ["clear", "load:new-task"]
+
+
+def test_open_task_handles_missing_task(mock_app, mocker) -> None:
+    """Opening a missing task should clear the editor and not load anything."""
+    mock_app.get_task.return_value = None
+
+    window = MainWindow(mock_app)
+
+    clear = mocker.patch.object(window.editor, "clear")
+    load_task = mocker.patch.object(window.editor, "load_task")
+
+    window._open_task("missing-task")
+
+    mock_app.get_task.assert_called_once_with("missing-task")
+    clear.assert_called_once()
+    load_task.assert_not_called()
+
+
 # TODO: write tests for unarchive and switch project,delete task
 
 # rename_project if not exist?
