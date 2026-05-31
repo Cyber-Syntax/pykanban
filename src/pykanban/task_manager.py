@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pykanban.error import ParseError
 from pykanban.exceptions import WriteError
 from pykanban.models import Priority, Status, Task
+from pykanban.parser import write_project, write_task
 from pykanban.task_utils import (
     build_task_file_path,
     insert_into_column,
@@ -66,15 +67,16 @@ class TaskManager:
         )
 
         self.state.tasks.put(task)
-        self.state.projects.get_active().column_order = insert_into_column(
-            project.column_order, status.value, task_id, position=None
+        project.column_order = insert_into_column(
+            project.column_order, status.value, task_id
         )
 
         try:
-            task.write(
-                build_task_file_path(project.folder_path, task.title, task_id)
+            write_task(
+                task,
+                build_task_file_path(project.folder_path, task.title, task_id),
             )
-            project.write()
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
@@ -101,6 +103,7 @@ class TaskManager:
         new_status = fields.get("status", task.status)
 
         # Extract fields to update
+        # TODO: make it readeable
         fields = {
             k: v for k, v in fields.items() if k not in {"position", "status"}
         }
@@ -137,8 +140,8 @@ class TaskManager:
                 old_path.unlink()
 
             # Save the task to the new path
-            task.write(new_path)
-            project.write()
+            write_task(task, new_path)
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
@@ -171,10 +174,11 @@ class TaskManager:
 
         # TODO: write tests
         try:
-            task.write(
-                build_task_file_path(project.folder_path, task.title, task_id)
+            write_task(
+                task,
+                build_task_file_path(project.folder_path, task.title, task_id),
             )
-            project.write()
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
@@ -204,6 +208,6 @@ class TaskManager:
 
         # TODO: write tests
         try:
-            project.write()
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))

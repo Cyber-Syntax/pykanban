@@ -13,12 +13,14 @@ from PySide6.QtWidgets import QMessageBox
 
 from pykanban.error import ConflictWarning, ParseError
 from pykanban.exceptions import WriteError
-from pykanban.models import Project, Task
+from pykanban.models import Project
+from pykanban.parser import parse_project, parse_task, write_project
 from pykanban.project_utils import (
     choose_active_project,
     empty_column_order,
     find_all_project_conflicts,
     load_project_tasks,
+    reconcile_order,
 )
 from pykanban.store import BoardView, ProjectStore, TaskStore
 from pykanban.utils import generate_project_id, slugify
@@ -51,7 +53,7 @@ def scan_project_folder(
         as well as an updated mtime cache.
 
     """
-    previous = mtime_cache or {}
+    previous: dict[Path, float] = mtime_cache or {}
     current: dict[Path, float] = {}
     changed: list[Path] = []
 
@@ -151,7 +153,7 @@ class ProjectManager:
                     folders_to_scan.append(folder)
 
         for folder in folders_to_scan:
-            project = Project.from_file(folder / "metadata.yml")
+            project = parse_project(folder / "metadata.yml")
             if isinstance(project, ParseError):
                 self.state.errors.append(project)
                 continue
@@ -189,7 +191,11 @@ class ProjectManager:
                 project_tasks.put(task)
 
             # Reconcile using only this project's tasks
-            project.reconcile_order(load_result.loaded_task_ids, project_tasks)
+            project.column_order = reconcile_order(
+                project.column_order,
+                load_result.loaded_task_ids,
+                project_tasks.tasks_by_id,
+            )
 
         self.state.projects.set_active(active.project_id)
         # Record conflicts from ALL projects, not just the active one
@@ -238,7 +244,7 @@ class ProjectManager:
 
         # TODO: write tests
         try:
-            project.write()
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
@@ -279,7 +285,7 @@ class ProjectManager:
         project.updated = datetime.now()
 
         try:
-            project.write()
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
@@ -370,7 +376,7 @@ class ProjectManager:
         project.updated = datetime.now()
 
         try:
-            project.write()
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
@@ -407,7 +413,7 @@ class ProjectManager:
         project.updated = datetime.now()
 
         try:
-            project.write()
+            write_project(project)
         except WriteError as e:
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
@@ -432,7 +438,7 @@ class ProjectManager:
 
         # Load changed tasks
         for path in scan.changed_paths:
-            task = Task.from_file(path)
+            task = parse_task(path)
             if isinstance(task, ParseError):
                 self.state.errors.append(task)
                 continue
@@ -444,8 +450,10 @@ class ProjectManager:
         for path in scan.deleted_paths:
             pass
 
-        project.reconcile_order(
-            set(self.state.tasks.tasks_by_id.keys()), self.state.tasks
+        project.column_order = reconcile_order(
+            project.column_order,
+            set(self.state.tasks.tasks_by_id.keys()),
+            self.state.tasks.tasks_by_id,
         )
 
         # Record conflicts from scan result

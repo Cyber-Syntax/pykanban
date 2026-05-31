@@ -29,6 +29,30 @@ def build_task_file_path(
     return project_folder / f"{slug}--{task_id}.md"
 
 
+def copy_column_order(
+    column_order: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Make and return a new dict where each list of task_ids is copied.
+
+    Makes a shallow copy of the column_order dict and
+    a shallow copy of each list of task IDs.
+
+    This ensures we don't mutate the caller's lists in-place.
+
+    Args:
+        column_order: The original column order mapping.
+
+    Returns:
+        A new column order dict with task ID inserted.
+    """
+    new_order: dict[str, list[str]] = {}
+    for column_name, task_ids in column_order.items():
+        # column_name: the dict key, like "todo, doing"
+        # task_ids: list of task IDs(8 char hex like ['a1bc31']) in column
+        new_order[column_name] = task_ids.copy()
+    return new_order
+
+
 def insert_into_column(
     column_order: dict[str, list[str]],
     status_value: str,
@@ -47,10 +71,10 @@ def insert_into_column(
         A new column_order dict with the task ID inserted.
     """
     # Create a copy of the column_order dict and nested lists
-    new_column_order = {k: v.copy() for k, v in column_order.items()}
+    new_column_order = copy_column_order(column_order)
 
     # Get or create the column list for the status value
-    column = new_column_order.setdefault(status_value, [])
+    column: list[str] = new_column_order.setdefault(status_value, [])
 
     # Task ID already exists in the column, return unchanged
     if task_id in column:
@@ -105,7 +129,7 @@ def reorder_in_column(
         A new column_order dict with the task ID reordered.
     """
     # Create a copy of the column_order dict and nested lists
-    new_column_order = {k: v.copy() for k, v in column_order.items()}
+    new_column_order = copy_column_order(column_order)
 
     # Find the column that contains the task ID and reorder it
     for ids in new_column_order.values():

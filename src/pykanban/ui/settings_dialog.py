@@ -1,10 +1,4 @@
-# | TASK-003 | Create `src/app/ui/settings_dialog.py`: `SettingsDialog(QDialog)` with a folder picker (`QFileDialog`). On accept, write `projects_dir` to config YAML and return the resolved `Settings`. Default suggested path: `~/Documents/pykanban-projects`.                               |           |                  |
-
-
-# Write a `SettingsDialog` class that inherits from `QDialog`.
-# It should have a folder picker (`QFileDialog`) to select the projects directory.
-# It should return the selected directory as a `Settings` object.
-# default suggested path: `~/Documents/pykanban-projects`.
+"""Settings dialog for PyKanban."""
 
 from pathlib import Path
 

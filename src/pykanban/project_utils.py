@@ -92,6 +92,44 @@ def find_all_project_conflicts(
     return all_conflicts
 
 
+def reconcile_order(
+    column_order: dict[str, list[str]],
+    known_ids: set[str],
+    tasks_by_id: dict[str, Task],
+) -> dict[str, list[str]]:
+    """Return a corrected column_order: stale IDs removed, missing IDs appended.
+
+    This is a pure function — it never mutates its inputs.
+
+    Args:
+        column_order: Current column order mapping (may contain stale IDs).
+        known_ids: Task IDs that actually exist (loaded from disk).
+        tasks_by_id: Task lookup used to find the correct column for orphaned IDs.
+
+    Returns:
+        New column_order with stale IDs dropped and missing IDs appended to
+        the column matching each task's status.
+    """
+    # Drop IDs that no longer exist on disk
+    result: dict[str, list[str]] = {}
+    for status_key, id_list in column_order.items():
+        # TODO: make this a list comprehension for efficiency
+        clean_list: list[str] = []
+        for task_id in id_list:
+            if task_id in known_ids:
+                clean_list.append(task_id)
+        result[status_key] = clean_list
+
+    # Append IDs that exist on disk but are absent from column_order
+    present = {i for ids in result.values() for i in ids}
+    for task_id in known_ids - present:
+        task = tasks_by_id.get(task_id)
+        if task:
+            result.setdefault(task.status.value, []).append(task_id)
+
+    return result
+
+
 def load_project_tasks(
     project: Project, mtime_cache: dict[Path, float] | None = None
 ) -> ProjectTasksLoadResult:
@@ -109,19 +147,21 @@ def load_project_tasks(
         ProjectTasksLoadResult containing loaded task IDs, parse errors,
         and an updated mtime cache.
     """
-    cache = mtime_cache or {}
+    from pykanban.parser import parse_task
+
+    cache: dict[Path, float] = mtime_cache or {}
     loaded_tasks: list[Task] = []
-    project_task_ids: set[str] = set()
-    parse_errors: list[ParseError] = []
+    loaded_task_ids: set[str] = set()
+    errors: list[ParseError] = []
 
     for md_file in project.folder_path.rglob("*.md"):
-        task = Task.from_file(md_file)
+        task = parse_task(md_file)
         if isinstance(task, ParseError):
-            parse_errors.append(task)
+            errors.append(task)
             continue
 
         loaded_tasks.append(task)
-        project_task_ids.add(task.id)
+        loaded_task_ids.add(task.id)
 
         # Seed the mtime cache while we have the file in hand
         try:
@@ -132,7 +172,7 @@ def load_project_tasks(
 
     return ProjectTasksLoadResult(
         loaded_tasks=loaded_tasks,
-        loaded_task_ids=project_task_ids,
-        parse_errors=parse_errors,
+        loaded_task_ids=loaded_task_ids,
+        parse_errors=errors,
         updated_mtime_cache=cache,
     )
