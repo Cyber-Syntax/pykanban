@@ -6,6 +6,7 @@ Uses PySide6 for UI rendering.
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -59,7 +60,7 @@ class TaskEditorPanel(QWidget):
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(800)
+        self._timer.setInterval(400)
         self._timer.timeout.connect(self._flush_changes)
 
         self._build_form()
@@ -75,6 +76,14 @@ class TaskEditorPanel(QWidget):
         """
         # cancel any pending writes for previous task before loading new one
         self._timer.stop()
+
+        preserve_body_cursor = (
+            self._task is not None and self._task.id == task.id
+        )
+        body_cursor = self.body_edit.textCursor()
+        body_position = body_cursor.position()
+        body_anchor = body_cursor.anchor()
+        body_scroll_value = self.body_edit.verticalScrollBar().value()
 
         # we can load the new task data into the editor widgets before flushing changes
         self._task = task
@@ -95,6 +104,13 @@ class TaskEditorPanel(QWidget):
             self._set_combo_value(self.status_combo, task.status)
             self._set_combo_value(self.priority_combo, task.priority)
             self.body_edit.setPlainText(task.raw_body)
+            if preserve_body_cursor:
+                self._restore_body_cursor(
+                    body_position,
+                    body_anchor,
+                    body_scroll_value,
+                    len(task.raw_body),
+                )
         # we use finally to ensure signals are unblocked even if an error occurs during population
         finally:
             for widget, blocked in zip(widgets, blocked_states):
@@ -217,3 +233,28 @@ class TaskEditorPanel(QWidget):
         md = MarkdownIt()
         html = md.render(raw_body)
         self.checklist_view.setHtml(html)
+
+    def _restore_body_cursor(
+        self,
+        position: int,
+        anchor: int,
+        scroll_value: int,
+        body_length: int,
+    ) -> None:
+        """Restore the body cursor and scroll position after a reload."""
+
+        # ensure the cursor position is within the new body length to avoid errors
+        cursor = self.body_edit.textCursor()
+
+        # if the body has shrunk and the previous cursor position is now out of bounds, move it to the end
+        cursor.setPosition(min(position, body_length))
+
+        # only restore the anchor if there was an actual selection, otherwise just set the cursor position
+        if anchor != position:
+            cursor.setPosition(
+                min(anchor, body_length),
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+        # if the body has shrunk and the previous scroll value is now out of bounds, move it to the maximum
+        self.body_edit.setTextCursor(cursor)
+        self.body_edit.verticalScrollBar().setValue(scroll_value)
