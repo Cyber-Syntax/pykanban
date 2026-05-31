@@ -44,7 +44,7 @@ managed = true
 required-environments = ["sys_platform == 'linux'"]
 
 [tool.pytest.ini_options]
-addopts = ["--import-mode=importlib"]
+addopts = "--cov=src --cov-fail-under=80 --cov-report=html --cov-report=term-missing"
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
@@ -62,6 +62,10 @@ markers = [
   "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
   "e2e: marks end-to-end integration tests",
 ]
+
+[tool.coverage.run]
+source = ["src/pykanban"]
+omit = ["tests/*", "scripts/*", "**/__pycache__/*", "*/migrations/*"]
 
 [tool.pytest_env]
 PYKANBAN_LOG = { value = "/tmp/pytest-of-{USER}-pykanban-logs", transform = true }
@@ -170,9 +174,7 @@ convention = "google"
 [tool.ruff.lint.pycodestyle]
 max-line-length = 79
 
-[tool.coverage.run]
-source = ["src/pykanban"]
-omit = ["tests/*", "scripts/*", "**/__pycache__/*"]
+
 
 [tool.mypy]
 warn_return_any = true

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QMimeData, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QContextMenuEvent,
@@ -230,8 +230,10 @@ class TaskCard(QFrame):
 
         if distance > QApplication.startDragDistance():
             self._dragging = True
-            # Schedule the actual drag operation asynchronously to avoid blocking
-            QTimer.singleShot(0, self._start_drag)
+            # Start the drag operation immediately
+            # to avoid issues with delayed drag start
+            # and state changes (e.g., mouse release)
+            self._start_drag()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         """Handle mouse release to emit clicked if no drag occurred.

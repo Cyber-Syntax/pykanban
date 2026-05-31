@@ -172,6 +172,17 @@ class MainWindow(QMainWindow):
 
     def _refresh_board(self, board) -> None:
         self.board.refresh(board)
+        current_task = self.editor._task
+
+        # if the currently open task was deleted or moved to a different column,
+        # we want to refresh the editor to show the latest data
+        # or clear if it no longer exists
+        if current_task is not None:
+            fresh_task = self.app.get_task(current_task.id)
+            if fresh_task is None:
+                self.editor.discard()
+            else:
+                self.editor.load_task(fresh_task)
         self.error_banner.set_errors(self.app.state.errors)
 
     def _delete_project(self, project_id: str) -> None:

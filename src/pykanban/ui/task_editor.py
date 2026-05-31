@@ -73,11 +73,34 @@ class TaskEditorPanel(QWidget):
         Args:
             task: Task to edit.
         """
+        # cancel any pending writes for previous task before loading new one
+        self._timer.stop()
+
+        # we can load the new task data into the editor widgets before flushing changes
         self._task = task
-        self.title_edit.setText(task.title)
-        self._set_combo_value(self.status_combo, task.status)
-        self._set_combo_value(self.priority_combo, task.priority)
-        self.body_edit.setPlainText(task.raw_body)
+
+        widgets = (
+            self.title_edit,
+            self.status_combo,
+            self.priority_combo,
+            self.body_edit,
+        )
+
+        # block signals to prevent triggering _schedule_flush while populating fields
+        blocked_states = [widget.blockSignals(True) for widget in widgets]
+
+        # populate fields with task data, ensuring we don't trigger any change signals
+        try:
+            self.title_edit.setText(task.title)
+            self._set_combo_value(self.status_combo, task.status)
+            self._set_combo_value(self.priority_combo, task.priority)
+            self.body_edit.setPlainText(task.raw_body)
+        # we use finally to ensure signals are unblocked even if an error occurs during population
+        finally:
+            for widget, blocked in zip(widgets, blocked_states):
+                widget.blockSignals(blocked)
+
+        # render checklist after setting raw_body to ensure it shows the correct content
         self._render_checklist(task.raw_body)
         self.setVisible(True)
 
@@ -98,6 +121,12 @@ class TaskEditorPanel(QWidget):
         # clear task reference to avoid writing to stale task
         self._task = None
         # make sure editor is hidden after clearing
+        self.setVisible(False)
+
+    def discard(self) -> None:
+        """Hide the editor without writing current widget state back."""
+        self._timer.stop()
+        self._task = None
         self.setVisible(False)
 
     def _build_form(self) -> None:
