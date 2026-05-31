@@ -22,19 +22,6 @@ from PySide6.QtWidgets import (
 from pykanban.app import KanbanApp
 from pykanban.models import Priority, Status, Task
 
-# TODO: debounce is little clunky
-# decrease the debounce which neovim/obsidian and similar apps
-# make it so much faster like in seconds, you can see the changes in
-# other apps immediately, but in pykanban it waits for 800ms of inactivity before saving
-
-# FIXME: currently editor can't be able to handle so fast changes, when I change the title
-# but fastly click to another task, the title change is not saved,
-# because the editor is already closed and the task reference is cleared
-# so we need a proper logic to handle this case,
-# we must save the changes even if the editor close so fast or changed to another task
-# we might need to use thread or async to handle the saving process,
-# so it can run in background and not block the UI
-
 
 class TaskEditorPanel(QWidget):
     """Editor panel for a single task."""
@@ -58,6 +45,7 @@ class TaskEditorPanel(QWidget):
         self.body_edit = QPlainTextEdit()
         self.checklist_view = QTextBrowser()
 
+        # Use a single-shot timer so edits are written after the user pauses.
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(400)
@@ -74,18 +62,27 @@ class TaskEditorPanel(QWidget):
         Args:
             task: Task to edit.
         """
-        # cancel any pending writes for previous task before loading new one
+        # Stop any pending save for the current task before we swap editors.
         self._timer.stop()
 
+        previous_task = self._task
+        if (
+            previous_task is not None
+            and previous_task.id != task.id
+            and self.isVisible()
+            and self._has_unsaved_changes(previous_task)
+        ):
+            self._flush_changes()
+
         preserve_body_cursor = (
-            self._task is not None and self._task.id == task.id
+            previous_task is not None and previous_task.id == task.id
         )
         body_cursor = self.body_edit.textCursor()
         body_position = body_cursor.position()
         body_anchor = body_cursor.anchor()
         body_scroll_value = self.body_edit.verticalScrollBar().value()
 
-        # we can load the new task data into the editor widgets before flushing changes
+        # Replace the current model reference before populating the widgets.
         self._task = task
 
         widgets = (
@@ -95,10 +92,9 @@ class TaskEditorPanel(QWidget):
             self.body_edit,
         )
 
-        # block signals to prevent triggering _schedule_flush while populating fields
+        # Block signals so programmatic updates do not look like user edits.
         blocked_states = [widget.blockSignals(True) for widget in widgets]
 
-        # populate fields with task data, ensuring we don't trigger any change signals
         try:
             self.title_edit.setText(task.title)
             self._set_combo_value(self.status_combo, task.status)
@@ -111,12 +107,11 @@ class TaskEditorPanel(QWidget):
                     body_scroll_value,
                     len(task.raw_body),
                 )
-        # we use finally to ensure signals are unblocked even if an error occurs during population
         finally:
             for widget, blocked in zip(widgets, blocked_states):
                 widget.blockSignals(blocked)
 
-        # render checklist after setting raw_body to ensure it shows the correct content
+        # Refresh the preview after the body text is in place.
         self._render_checklist(task.raw_body)
         self.setVisible(True)
 
@@ -132,11 +127,9 @@ class TaskEditorPanel(QWidget):
     def clear(self) -> None:
         """Stop the debounce timer, flush any pending edit, then hide."""
         self._timer.stop()
-        # writes while task still exists in store
+        # Persist first so the task still has a valid identity in storage.
         self._flush_changes()
-        # clear task reference to avoid writing to stale task
         self._task = None
-        # make sure editor is hidden after clearing
         self.setVisible(False)
 
     def discard(self) -> None:
@@ -179,7 +172,8 @@ class TaskEditorPanel(QWidget):
 
     def _flush_changes(self) -> None:
         """Write changes through AppState."""
-        if self._task is None:
+        task = self._task
+        if task is None:
             return
 
         status = self.status_combo.currentData()
@@ -191,7 +185,7 @@ class TaskEditorPanel(QWidget):
             "priority": priority,
             "raw_body": self.body_edit.toPlainText(),
         }
-        self.app.tasks.update_task(self._task.id, fields)
+        self.app.tasks.update_task(task.id, fields)
         self._render_checklist(fields["raw_body"])
         self.task_saved.emit()
 
@@ -218,6 +212,17 @@ class TaskEditorPanel(QWidget):
                 combo.setCurrentIndex(i)
                 return
 
+    def _has_unsaved_changes(self, task: Task) -> bool:
+        """Return whether the editor differs from the loaded task."""
+        return any(
+            (
+                self.title_edit.text().strip() != task.title,
+                self.status_combo.currentData() != task.status,
+                self.priority_combo.currentData() != task.priority,
+                self.body_edit.toPlainText() != task.raw_body,
+            )
+        )
+
     def _render_checklist(self, raw_body: str) -> None:
         """Render a markdown checklist view.
 
@@ -243,18 +248,16 @@ class TaskEditorPanel(QWidget):
     ) -> None:
         """Restore the body cursor and scroll position after a reload."""
 
-        # ensure the cursor position is within the new body length to avoid errors
+        # Clamp restored positions so shorter bodies stay in range.
         cursor = self.body_edit.textCursor()
 
-        # if the body has shrunk and the previous cursor position is now out of bounds, move it to the end
         cursor.setPosition(min(position, body_length))
 
-        # only restore the anchor if there was an actual selection, otherwise just set the cursor position
         if anchor != position:
             cursor.setPosition(
                 min(anchor, body_length),
                 QTextCursor.MoveMode.KeepAnchor,
             )
-        # if the body has shrunk and the previous scroll value is now out of bounds, move it to the maximum
         self.body_edit.setTextCursor(cursor)
-        self.body_edit.verticalScrollBar().setValue(scroll_value)
+        scroll_bar = self.body_edit.verticalScrollBar()
+        scroll_bar.setValue(min(scroll_value, scroll_bar.maximum()))
