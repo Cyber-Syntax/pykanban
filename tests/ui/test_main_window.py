@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from pykanban.app import KanbanApp
 from pykanban.error import ParseError
-from pykanban.models import Project, Status
+from pykanban.models import Priority, Project, Status
 from pykanban.ui.main_window import MainWindow
 
 
@@ -265,6 +265,51 @@ def test_open_task_handles_missing_task(mock_app, mocker) -> None:
     mock_app.get_task.assert_called_once_with("missing-task")
     clear.assert_called_once()
     load_task.assert_not_called()
+
+
+def test_refresh_board_resyncs_open_editor_task(mock_app, mocker) -> None:
+    """Refreshing the board should reload the open task from current state."""
+    open_task = MagicMock()
+    open_task.id = "t1"
+
+    fresh_task = MagicMock()
+    fresh_task.id = "t1"
+    fresh_task.title = "Task One"
+    fresh_task.status = Status.DOING
+    fresh_task.priority = Priority.LOW
+    fresh_task.raw_body = "# Description\n\nUpdated body."
+
+    mock_app.get_task.return_value = fresh_task
+
+    window = MainWindow(mock_app)
+    window.editor._task = open_task
+
+    load_spy = mocker.spy(window.editor, "load_task")
+
+    window._refresh_board(MagicMock())
+
+    mock_app.get_task.assert_called_once_with("t1")
+    load_spy.assert_called_once_with(fresh_task)
+    assert window.editor._task is fresh_task
+
+
+def test_refresh_board_discards_deleted_open_task(mock_app, mocker) -> None:
+    """Refreshing the board should drop an editor task that no longer exists."""
+    open_task = MagicMock()
+    open_task.id = "t1"
+
+    mock_app.get_task.return_value = None
+
+    window = MainWindow(mock_app)
+    window.editor._task = open_task
+
+    discard_spy = mocker.spy(window.editor, "discard")
+
+    window._refresh_board(MagicMock())
+
+    mock_app.get_task.assert_called_once_with("t1")
+    discard_spy.assert_called_once()
+    assert window.editor._task is None
 
 
 def test_refresh_from_state_clears_board_when_no_active_project(
