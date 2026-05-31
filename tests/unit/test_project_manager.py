@@ -13,6 +13,7 @@ from pykanban.config import Settings
 from pykanban.error import ConflictWarning, ParseError
 from pykanban.exceptions import WriteError
 from pykanban.models import Project, Status, Task
+from pykanban.parser import parse_project, write_project, write_task
 from pykanban.project_manager import scan_project_folder
 from tests.unit.conftest import make_project, make_task
 
@@ -33,8 +34,8 @@ class TestProjectManagerStartupScan:
         task: Task = make_task(id="scan1111", status=Status.TODO)
 
         # Write actual files via the model write methods
-        proj.write()
-        task.write(proj_folder / f"scan-task--{task.id}.md")
+        write_project(proj)
+        write_task(task, proj_folder / f"scan-task--{task.id}.md")
 
         app.startup_scan(projects_dir)
 
@@ -135,7 +136,7 @@ class TestProjectManagerStartupScan:
         proj_folder = projects_dir / "p1"
         proj_folder.mkdir()
         proj = make_project(proj_folder, project_id="p_scan1")
-        proj.write()
+        write_project(proj)
 
         # Write an invalid task file (e.g., missing YAML front matter)
         invalid_task = proj_folder / "invalid_task.md"
@@ -159,7 +160,7 @@ class TestProjectManagerStartupScan:
         proj_folder = projects_dir / "p1"
         proj_folder.mkdir()
         proj = make_project(proj_folder, project_id="p_active123")
-        proj.write()
+        write_project(proj)
 
         app.startup_scan(projects_dir)
 
@@ -173,16 +174,16 @@ class TestProjectManagerStartupScan:
         # Setup Project 1
         p1_folder = projects_dir / "p1"
         p1_folder.mkdir()
-        make_project(p1_folder, project_id="p1").write()
+        write_project(make_project(p1_folder, project_id="p1"))
         t1 = make_task(id="t1", status=Status.TODO)
-        t1.write(p1_folder / f"{t1.id}.md")
+        write_task(t1, p1_folder / f"{t1.id}.md")
 
         # Setup Project 2
         p2_folder = projects_dir / "p2"
         p2_folder.mkdir()
-        make_project(p2_folder, project_id="p2").write()
+        write_project(make_project(p2_folder, project_id="p2"))
         t2 = make_task(id="t2", status=Status.DOING)
-        t2.write(p2_folder / f"{t2.id}.md")
+        write_task(t2, p2_folder / f"{t2.id}.md")
 
         app.startup_scan(projects_dir)
 
@@ -212,7 +213,7 @@ class TestProjectManagerStartupScan:
         # Setup Project
         proj_folder = projects_dir / "p1"
         proj_folder.mkdir()
-        make_project(proj_folder, project_id="p1").write()
+        write_project(make_project(proj_folder, project_id="p1"))
 
         # Simulate a sync conflict file
         conflict_file = (
@@ -251,7 +252,7 @@ class TestProjectManagerRenameProject:
         app.rename_project(proj.project_id, "Renamed Meta Title")
 
         # reload project from disk to verify metadata.yml was updated
-        reloaded = Project.from_file(proj.folder_path / "metadata.yml")
+        reloaded = parse_project(proj.folder_path / "metadata.yml")
         assert reloaded.title == "Renamed Meta Title"
 
     def test_prevent_duplicate_titles_on_rename(self, app: KanbanApp) -> None:
@@ -352,15 +353,14 @@ class TestProjectManagerArchiveProject:
     ) -> None:
         project = app_with_active_project.get_active_project()
 
-        def raise_write_error() -> None:
+        def raise_write_error(*args, **kwargs) -> None:
             raise WriteError(
                 path=project.folder_path,
                 reason="write failed",
             )
 
         monkeypatch.setattr(
-            project,
-            "write",
+            "pykanban.project_manager.write_project",
             raise_write_error,
         )
 
@@ -401,7 +401,7 @@ class TestProjectManagerArchiveProject:
             folder.mkdir()
 
             project = make_project(folder, project_id=pid)
-            project.write()
+            write_project(project)
             app.put_project(project)
 
         app.set_active_project("p1")
@@ -468,13 +468,16 @@ class TestProjectManagerUnarchiveProject:
 
         project = app_with_active_project.get_project(project_id)
 
-        def raise_write_error():
+        def raise_write_error(*args, **kwargs):
             raise WriteError(
                 path=project.folder_path,
                 reason="write failed",
             )
 
-        monkeypatch.setattr(project, "write", raise_write_error)
+        monkeypatch.setattr(
+            "pykanban.project_manager.write_project",
+            raise_write_error,
+        )
 
         app_with_active_project.unarchive_project(project_id)
 
@@ -553,7 +556,7 @@ class TestProjectManagerDeleteProject:
             folder.mkdir()
 
             project = make_project(folder, project_id=pid)
-            project.write()
+            write_project(project)
             app.put_project(project)
 
         app.set_active_project("p1")
@@ -576,7 +579,7 @@ class TestProjectManagerDeleteProject:
             folder.mkdir()
 
             project = make_project(folder, project_id=pid)
-            project.write()
+            write_project(project)
             app.put_project(project)
 
         app.set_active_project("p1")
@@ -646,14 +649,14 @@ class TestProjectManagerDeleteProject:
 
         # active project (will be deleted)
         active = make_project(settings.projects_dir / "a", project_id="p1")
-        active.write()
+        write_project(active)
         app.put_project(active)
 
         # replacement project
         replacement = make_project(
             settings.projects_dir / "b", project_id="p2"
         )
-        replacement.write()
+        write_project(replacement)
         app.put_project(replacement)
 
         app.set_active_project("p1")
@@ -672,7 +675,7 @@ class TestProjectManagerDeleteProject:
         app = KanbanApp(settings)
 
         project = make_project(settings.projects_dir / "a", project_id="p1")
-        project.write()
+        write_project(project)
         app.put_project(project)
 
         app.set_active_project("p1")
@@ -695,13 +698,13 @@ class TestProjectManagerDeleteProject:
         app = KanbanApp(settings)
 
         active = make_project(settings.projects_dir / "a", project_id="p1")
-        active.write()
+        write_project(active)
         app.put_project(active)
 
         replacement = make_project(
             settings.projects_dir / "b", project_id="p2"
         )
-        replacement.write()
+        write_project(replacement)
         app.put_project(replacement)
 
         app.set_active_project("p1")
@@ -747,7 +750,7 @@ class TestProjectManagerSwitchProject:
         folder.mkdir()
 
         project = make_project(folder, project_id="p1")
-        project.write()
+        write_project(project)
         app.put_project(project)
 
         task = make_task(id="t1", status=Status.TODO)
@@ -763,8 +766,7 @@ class TestProjectManagerSwitchProject:
             lambda *args, **kwargs: scan,
         )
         monkeypatch.setattr(
-            Task,
-            "from_file",
+            "pykanban.project_manager.parse_task",
             lambda path: task,
         )
 
@@ -786,7 +788,7 @@ class TestProjectManagerSwitchProject:
         folder.mkdir()
 
         project = make_project(folder, project_id="p1")
-        project.write()
+        write_project(project)
         app.put_project(project)
 
         parse_error = ParseError(
@@ -805,8 +807,7 @@ class TestProjectManagerSwitchProject:
             lambda *args, **kwargs: scan,
         )
         monkeypatch.setattr(
-            Task,
-            "from_file",
+            "pykanban.project_manager.parse_task",
             lambda path: parse_error,
         )
 
@@ -828,7 +829,7 @@ class TestProjectManagerSwitchProject:
         folder.mkdir()
 
         project = make_project(folder, project_id="p1")
-        project.write()
+        write_project(project)
         app.put_project(project)
 
         conflict_path = Path("duplicate.md")
@@ -850,51 +851,6 @@ class TestProjectManagerSwitchProject:
             isinstance(err, ConflictWarning) and err.path == conflict_path
             for err in app.state.errors
         )
-
-    def test_reconcile_order_called_with_loaded_task_ids(
-        self,
-        tmp_path: Path,
-        monkeypatch,
-    ) -> None:
-        settings = Settings(projects_dir=tmp_path / "projects")
-        settings.projects_dir.mkdir(parents=True)
-        app = KanbanApp(settings)
-
-        folder = settings.projects_dir / "proj"
-        folder.mkdir()
-
-        project = make_project(folder, project_id="p1")
-        project.write()
-        project.reconcile_order = Mock()
-
-        app.put_project(project)
-
-        task = Mock(spec=Task)
-        task.id = "t123"
-        task.status = Status.TODO
-
-        scan = Mock()
-        scan.changed_paths = [Path("task.md")]
-        scan.deleted_paths = [Path("deleted.md")]  # exercise deleted branch
-        scan.conflict_paths = []
-        scan.mtime_cache = {}
-
-        monkeypatch.setattr(
-            "pykanban.project_manager.scan_project_folder",
-            lambda *args, **kwargs: scan,
-        )
-        monkeypatch.setattr(
-            Task,
-            "from_file",
-            lambda path: task,
-        )
-
-        app.switch_project("p1")
-
-        project.reconcile_order.assert_called_once()
-
-        task_ids = project.reconcile_order.call_args.args[0]
-        assert task_ids == {"t123"}
 
 
 class TestScanProjectFolder:

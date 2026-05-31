@@ -12,6 +12,7 @@ from pykanban.project_utils import (
     find_all_project_conflicts,
     find_sync_conflicts,
     load_project_tasks,
+    reconcile_order,
 )
 
 
@@ -231,15 +232,13 @@ class TestLoadProjectTasks:
         with TemporaryDirectory() as tmpdir:
             folder = Path(tmpdir)
             task_file = folder / "task.md"
-            task_file.write_text(
-                "# Task\nstatus: backlog\npriority: medium\n\nbody"
-            )
+            task_file.write_text("# Task")
 
             project = Mock(spec=Project, folder_path=folder)
 
-            with patch.object(Task, "from_file") as mock_from_file:
+            with patch("pykanban.parser.parse_task") as mock_parse_task:
                 task = Mock(spec=Task, id="task_123")
-                mock_from_file.return_value = task
+                mock_parse_task.return_value = task
 
                 result = load_project_tasks(project)
 
@@ -251,13 +250,13 @@ class TestLoadProjectTasks:
         with TemporaryDirectory() as tmpdir:
             folder = Path(tmpdir)
             bad_file = folder / "bad.md"
-            bad_file.write_text("invalid yaml")
+            bad_file.write_text("content")
 
             project = Mock(spec=Project, folder_path=folder)
 
-            with patch.object(Task, "from_file") as mock_from_file:
+            with patch("pykanban.parser.parse_task") as mock_parse_task:
                 error = ParseError(path=bad_file, reason="Invalid YAML")
-                mock_from_file.return_value = error
+                mock_parse_task.return_value = error
 
                 result = load_project_tasks(project)
 
@@ -275,10 +274,10 @@ class TestLoadProjectTasks:
 
             project = Mock(spec=Project, folder_path=folder)
 
-            with patch.object(Task, "from_file") as mock_from_file:
+            with patch("pykanban.parser.parse_task") as mock_parse_task:
                 task1 = Mock(spec=Task, id="t_001")
                 task2 = Mock(spec=Task, id="t_002")
-                mock_from_file.side_effect = [task1, task2]
+                mock_parse_task.side_effect = [task1, task2]
 
                 result = load_project_tasks(project)
 
@@ -294,9 +293,9 @@ class TestLoadProjectTasks:
             existing_cache = {Path("/some/other/file.md"): 1234.5}
             project = Mock(spec=Project, folder_path=folder)
 
-            with patch.object(Task, "from_file") as mock_from_file:
+            with patch("pykanban.parser.parse_task") as mock_parse_task:
                 task = Mock(spec=Task, id="t_123")
-                mock_from_file.return_value = task
+                mock_parse_task.return_value = task
 
                 result = load_project_tasks(project, existing_cache)
 
@@ -314,9 +313,9 @@ class TestLoadProjectTasks:
 
             project = Mock(spec=Project, folder_path=folder)
 
-            with patch.object(Task, "from_file") as mock_from_file:
+            with patch("pykanban.parser.parse_task") as mock_parse_task:
                 task = Mock(spec=Task, id="t_123")
-                mock_from_file.return_value = task
+                mock_parse_task.return_value = task
 
                 # Mock stat to raise OSError (file disappeared)
                 with patch.object(
@@ -327,3 +326,67 @@ class TestLoadProjectTasks:
                     # Should still load the task, just without mtime
                     assert result.loaded_task_ids == {"t_123"}
                     assert task_file not in result.updated_mtime_cache
+
+
+class TestReconcileOrder:
+    def test_removes_stale_ids(self):
+        column_order = {"todo": ["a", "stale"], "doing": []}
+        known_ids = {"a"}
+        tasks_by_id = {"a": Mock(status=Status.TODO)}
+
+        result = reconcile_order(column_order, known_ids, tasks_by_id)
+
+        assert result["todo"] == ["a"]
+        assert result["doing"] == []
+
+    def test_appends_missing_ids_to_task_status(self):
+        column_order = {"todo": [], "doing": []}
+        known_ids = {"b"}
+        tasks_by_id = {"b": Mock(status=Status.DOING)}
+
+        result = reconcile_order(column_order, known_ids, tasks_by_id)
+
+        assert result["doing"] == ["b"]
+
+    def test_is_pure_and_does_not_mutate_inputs(self):
+        column_order = {
+            "backlog": ["a"],
+            "todo": ["b", "stale"],
+            "doing": [],
+            "done": [],
+        }
+        original = {
+            "backlog": ["a"],
+            "todo": ["b", "stale"],
+            "doing": [],
+            "done": [],
+        }
+        known_ids = {"a", "b"}
+        tasks_by_id = {
+            "a": Mock(status=Status.BACKLOG),
+            "b": Mock(status=Status.TODO),
+        }
+
+        result = reconcile_order(column_order, known_ids, tasks_by_id)
+
+        assert column_order == original
+        assert result is not column_order
+        assert result["todo"] == ["b"]
+
+    def test_ignores_known_ids_missing_in_tasks_lookup(self):
+        column_order = {"todo": []}
+        known_ids = {"ghost"}
+        tasks_by_id = {}
+
+        result = reconcile_order(column_order, known_ids, tasks_by_id)
+
+        assert result == {"todo": []}
+
+    def test_creates_missing_status_bucket_when_appending(self):
+        column_order = {"todo": []}
+        known_ids = {"a"}
+        tasks_by_id = {"a": Mock(status=Status.DONE)}
+
+        result = reconcile_order(column_order, known_ids, tasks_by_id)
+
+        assert result["done"] == ["a"]
