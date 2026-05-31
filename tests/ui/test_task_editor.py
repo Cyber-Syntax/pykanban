@@ -30,6 +30,10 @@ def _select_combo_value(combo, value) -> None:
             return
 
 
+def _long_body(line_count: int = 50) -> str:
+    return "\n".join(f"Line {index}" for index in range(line_count)) + "\n"
+
+
 def test_load_task_populates_editor_and_shows_it() -> None:
     """Loading a task should refresh all widgets and show the editor."""
     app = MagicMock(spec=KanbanApp)
@@ -130,6 +134,122 @@ def test_load_task_does_not_preserve_cursor_for_different_task() -> None:
     editor.load_task(second_task)
 
     assert editor.body_edit.textCursor().position() == 0
+
+
+def test_load_task_flushes_pending_changes_before_switching_tasks(
+    mocker,
+) -> None:
+    """Loading a new task should persist edits from the current task first."""
+    app = MagicMock(spec=KanbanApp)
+    app.tasks = MagicMock()
+
+    editor = TaskEditorPanel(app)
+
+    current_task = _make_task("task-1", "# Description\n\nOld body\n")
+    editor.load_task(current_task)
+    editor.title_edit.setText("  Updated title  ")
+    editor.body_edit.setPlainText("# Description\n\nUpdated body\n")
+
+    update_task = mocker.patch.object(
+        app.tasks, "update_task", return_value=current_task
+    )
+
+    next_task = _make_task("task-2", "# Description\n\nNext body\n")
+    editor.load_task(next_task)
+
+    update_task.assert_called_once_with(
+        "task-1",
+        {
+            "title": "Updated title",
+            "status": Status.DOING,
+            "priority": Priority.MEDIUM,
+            "raw_body": "# Description\n\nUpdated body\n",
+        },
+    )
+    assert editor._task is next_task
+    assert editor.title_edit.text() == next_task.title
+    assert editor.body_edit.toPlainText() == next_task.raw_body
+
+
+def test_load_task_does_not_reflush_same_task_after_status_save(
+    mocker,
+) -> None:
+    """Reloading the same task after a status change should not save twice."""
+    app = MagicMock(spec=KanbanApp)
+    app.tasks = MagicMock()
+
+    editor = TaskEditorPanel(app)
+    task = _make_task("task-1", "# Description\n\nBody\n")
+    editor.load_task(task)
+
+    update_task = mocker.patch.object(
+        app.tasks, "update_task", return_value=task
+    )
+
+    _select_combo_value(editor.status_combo, Status.DONE)
+    editor._flush_changes()
+
+    refreshed_task = _make_task("task-1", "# Description\n\nBody\n")
+    refreshed_task.status = Status.DONE
+    editor.load_task(refreshed_task)
+
+    assert update_task.call_count == 1
+    update_task.assert_called_once_with(
+        "task-1",
+        {
+            "title": "Example Task",
+            "status": Status.DONE,
+            "priority": Priority.MEDIUM,
+            "raw_body": "# Description\n\nBody\n",
+        },
+    )
+
+
+def test_load_task_clamps_selection_when_body_shrinks() -> None:
+    """Reloading a shorter body should keep the selection within bounds."""
+    app = MagicMock(spec=KanbanApp)
+    app.tasks = MagicMock()
+
+    editor = TaskEditorPanel(app)
+
+    initial_task = _make_task("task-1", _long_body(80))
+    editor.load_task(initial_task)
+
+    cursor = editor.body_edit.textCursor()
+    cursor.setPosition(10)
+    cursor.setPosition(60, QTextCursor.MoveMode.KeepAnchor)
+    editor.body_edit.setTextCursor(cursor)
+
+    refreshed_task = _make_task("task-1", _long_body(6))
+    editor.load_task(refreshed_task)
+
+    restored_cursor = editor.body_edit.textCursor()
+    assert restored_cursor.selectionStart() == 10
+    assert restored_cursor.selectionEnd() == len(refreshed_task.raw_body)
+
+
+def test_load_task_clamps_scroll_when_body_shrinks() -> None:
+    """Reloading a shorter body should not restore an out-of-range scroll."""
+    app = MagicMock(spec=KanbanApp)
+    app.tasks = MagicMock()
+
+    editor = TaskEditorPanel(app)
+
+    initial_task = _make_task("task-1", _long_body(120))
+    editor.load_task(initial_task)
+
+    scroll_bar = editor.body_edit.verticalScrollBar()
+    scroll_bar.setValue(scroll_bar.maximum())
+    previous_scroll = scroll_bar.value()
+
+    refreshed_task = _make_task("task-1", _long_body(8))
+    editor.load_task(refreshed_task)
+
+    restored_scroll = editor.body_edit.verticalScrollBar().value()
+    restored_maximum = editor.body_edit.verticalScrollBar().maximum()
+
+    assert restored_scroll <= restored_maximum
+    assert restored_scroll <= previous_scroll
 
 
 def test_schedule_flush_ignores_missing_task() -> None:
