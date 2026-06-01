@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -57,6 +58,7 @@ class MainWindow(QMainWindow):
         self.sidebar = ProjectSidebar(self.app)
         self.board = KanbanBoard(self.app)
         self.editor = TaskEditorPanel(self.app)
+        self._sidebar_hidden = False
 
         self._build_layout()
         self._wire_signals()
@@ -70,13 +72,28 @@ class MainWindow(QMainWindow):
     def _build_layout(self) -> None:
         center = QWidget()
         main_layout = QVBoxLayout(center)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        top_bar = QWidget()
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.sidebar_toggle = QPushButton("<")
+        self.sidebar_toggle.setFixedWidth(28)
+        self.sidebar_toggle.clicked.connect(self._toggle_sidebar)
+
+        top_bar_layout.addWidget(self.sidebar_toggle)
+        top_bar_layout.addStretch(1)
 
         content = QWidget()
         content_layout = QHBoxLayout(content)
-        content_layout.addWidget(self.sidebar, 1)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
+        content_layout.addWidget(self.sidebar)
         content_layout.addWidget(self.board, 3)
         content_layout.addWidget(self.editor, 2)
 
+        main_layout.addWidget(top_bar)
         main_layout.addWidget(self.error_banner)
         main_layout.addWidget(content)
 
@@ -97,6 +114,12 @@ class MainWindow(QMainWindow):
         self.sidebar.project_unarchive_requested.connect(
             self._unarchive_project
         )
+
+    def _toggle_sidebar(self) -> None:
+        """Hide or show the whole project sidebar."""
+        self._sidebar_hidden = not self._sidebar_hidden
+        self.sidebar.content_widget.setVisible(not self._sidebar_hidden)
+        self.sidebar_toggle.setText(">" if self._sidebar_hidden else "<")
 
     def _initial_load(self) -> None:
         self.app.projects.startup_scan(self.app.state.settings.projects_dir)
