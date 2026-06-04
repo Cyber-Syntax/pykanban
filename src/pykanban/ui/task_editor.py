@@ -48,7 +48,7 @@ class TaskEditorPanel(QWidget):
         # Use a single-shot timer so edits are written after the user pauses.
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.setInterval(400)
+        self._timer.setInterval(800)
         self._timer.timeout.connect(self._flush_changes)
 
         self._build_form()

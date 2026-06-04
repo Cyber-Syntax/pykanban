@@ -23,6 +23,11 @@ from pykanban.project_utils import (
     reconcile_order,
 )
 from pykanban.store import BoardView, ProjectStore, TaskStore
+from pykanban.task_utils import (
+    build_task_file_path,
+    insert_into_column,
+    remove_from_columns,
+)
 from pykanban.utils import generate_project_id, slugify
 
 if TYPE_CHECKING:
@@ -459,3 +464,112 @@ class ProjectManager:
         # Record conflicts from scan result
         for path in scan.conflict_paths:
             self.state.errors.append(ConflictWarning(path=path))
+
+    def apply_external_changes(
+        self, changed: list[Path], deleted: list[Path]
+    ) -> None:
+        """Apply external detected file changes to in memory state.
+
+        Called by MainWindow when Watcher fires.
+        Errors are append to state.errors (shown by error_banner)
+        Does not write any files, read-only reaction to external changes.
+
+        Args:
+            changed: md files that are new or modified
+            deleted: md files that no longer exist on disk
+        """
+        # may raise if no active
+        active = self.state.projects.get_active()
+
+        # re-parse changed/new files
+        for path in changed:
+            task = parse_task(path)
+            if isinstance(task, ParseError):
+                self.state.errors.append(task)
+                continue
+
+            # remove task from column order if status changed
+            old_task = self.state.tasks.tasks_by_id.get(task.id)
+            if old_task is not None and old_task.status != task.status:
+                active.column_order = remove_from_columns(
+                    active.column_order, task.id
+                )
+                active.column_order = insert_into_column(
+                    active.column_order, task.status.value, task.id
+                )
+
+            # add/update task in memory
+            self.state.tasks.put(task)
+
+        # TODO: this is so nested and hard to read, refactor to better flat structure
+        deleted_ids: set[str] = set()
+        for path in deleted:
+            # match by path -> task id(filename pattern: slug--id.md)
+            stem = path.stem  # e.g "learn-pykanban--a3f9c1b2"
+            if "--" not in stem:
+                continue
+
+            task_id = stem.rsplit("--", 1)[-1]
+            task = self.state.tasks.tasks_by_id.get(task_id)
+
+            if task is not None:
+                # task still exist in memory. check whether its current
+                # expected path differs from the deleted path -- if so,
+                # this deletion was caused by an internal rename (TaskManager
+                # wrote a new file and unlinked the old one).
+                # Treat it as a no-op; the watcher will emit a separate
+                # changed event for the new file which apply_external_changes
+                # will handle above.
+                expected_path = build_task_file_path(
+                    active.folder_path, task.title, task_id
+                )
+                if expected_path != path:
+                    continue
+
+                # expected path matches deleted path: the file is truly gone
+                # externally (not a rename), so remove it from memory.
+                self.state.tasks.remove(task_id)
+                deleted_ids.add(task_id)
+                self.state.errors.append(
+                    ParseError(path=path, reason="File deleted externally")
+                )
+
+        # reconcile column order (drops stale IDs, re-places orphans)
+        if deleted_ids:
+            active.column_order = reconcile_order(
+                active.column_order,
+                set(self.state.tasks.tasks_by_id.keys()),
+                self.state.tasks.tasks_by_id,
+            )
+
+    def handle_project_folder_deleted(self, folder_path: Path) -> None:
+        """Record an error when an entire project folder is removed externally.
+
+        Args:
+            folder_path: folder that no longer exists on disk.
+        """
+        project = next(
+            (
+                p
+                for p in self.state.projects.projects_by_id.values()
+                if p.folder_path == folder_path
+            ),
+            None,
+        )
+        if project is None:
+            return
+
+        self.state.errors.append(
+            ParseError(
+                path=folder_path,
+                reason=f"Project folder '{project.title}' was deleted externally.",
+            )
+        )
+
+        # remove from memory so sidebar no longer shows it
+        del self.state.projects.projects_by_id[project.project_id]
+
+        # if it was active, clear active state and tasks
+        if self.state.projects.active_project_id == project.project_id:
+            self.state.projects.active_project_id = None
+            self.state.tasks = TaskStore()
