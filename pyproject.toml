@@ -1,7 +1,7 @@
 [project]
 name = "pykanban"
 version = "0.1.0"
-description = "Add your description here"
+description = "PyKanban is a Kanban board application that uses markdown files for task management."
 readme = "README.md"
 authors = [
   { name = "Cyber-Syntax", email = "115875369+Cyber-Syntax@users.noreply.github.com" },
@@ -26,22 +26,20 @@ source-include = ["pykanban/data/**"]
 
 [dependency-groups]
 dev = [
-  "pytest",
-  "pytest-cov",
-  "pytest-mock",
-  "pytest-asyncio",
-  "pytest-env",
-  "mypy",
-  "python-lsp-server[all]>=1.14.0",
-  "pylsp-mypy>=0.7.1",
+  "pytest>=9",
+  "pytest-cov>=6",
+  "pytest-mock>=3",
+  "pytest-env>=1.4.0",
   "memray>=1.19.3",
-  "hypothesis>=6.155.0",
+  "hypothesis>=6.153.0",
 ]
-lint = ["ruff"]
+lint = ["ruff>=0.15.14"]
 
 [tool.uv]
 managed = true
 required-environments = ["sys_platform == 'linux'"]
+# Prevent supply chain attacks
+exclude-newer = "7 days"
 
 [tool.pytest.ini_options]
 addopts = "--cov=src --cov-fail-under=80 --cov-report=html --cov-report=term-missing"
@@ -173,8 +171,6 @@ convention = "google"
 
 [tool.ruff.lint.pycodestyle]
 max-line-length = 79
-
-
 
 [tool.mypy]
 warn_return_any = true
