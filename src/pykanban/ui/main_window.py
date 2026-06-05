@@ -25,6 +25,7 @@ from pykanban.ui.error_banner import ErrorBanner
 from pykanban.ui.kanban_board import KanbanBoard
 from pykanban.ui.project_sidebar import ProjectSidebar
 from pykanban.ui.task_editor import TaskEditorPanel
+from pykanban.watcher import Watcher
 
 if TYPE_CHECKING:
     from pykanban.app import KanbanApp
@@ -54,6 +55,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.app: KanbanApp = app
 
+        self._watcher = Watcher(self)
         self.error_banner = ErrorBanner()
         self.sidebar = ProjectSidebar(self.app)
         self.board = KanbanBoard(self.app)
@@ -114,6 +116,10 @@ class MainWindow(QMainWindow):
         self.sidebar.project_unarchive_requested.connect(
             self._unarchive_project
         )
+        self._watcher.changes_detected.connect(self._on_external_changes)
+        self._watcher.project_folder_deleted.connect(
+            self._on_project_folder_deleted
+        )
 
     def _toggle_sidebar(self) -> None:
         """Hide or show the whole project sidebar."""
@@ -123,9 +129,38 @@ class MainWindow(QMainWindow):
 
     def _initial_load(self) -> None:
         self.app.projects.startup_scan(self.app.state.settings.projects_dir)
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
         self.sidebar.refresh(
             list(self.app.state.projects.projects_by_id.values())
         )
+        self._refresh_from_state()
+
+    def _on_external_changes(
+        self, changed: list[Path], deleted: list[Path]
+    ) -> None:
+        """React to files modified or removed outside the app."""
+        if not changed and not deleted:
+            return
+        try:
+            self.app.apply_external_changes(changed, deleted)
+        except KeyError:
+            # no active project (e.g all archived); nothing to refresh
+            return
+        self._refresh_from_state()
+
+    def _on_project_folder_deleted(self, folder_path: Path) -> None:
+        self.app.handle_project_folder_deleted(folder_path)
+        # clear from editor and refresh sidebar to clear stale
+        self.editor.clear()
+        self.sidebar.refresh(list(self.app.projects_list))
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
+        # refresh the state
         self._refresh_from_state()
 
     def _open_task(self, task_id: str) -> None:
@@ -238,6 +273,11 @@ class MainWindow(QMainWindow):
 
         # refresh sidebar; board will show empty state if no project remains
         self.sidebar.refresh(list(self.app.projects_list))
+        # set projects to watcher
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
         self._refresh_from_state()
 
     def _archive_project(self, project_id: str) -> None:
@@ -272,6 +312,11 @@ class MainWindow(QMainWindow):
         # Sidebar refresh moves the item from active -> archived section
         self.sidebar.refresh(list(self.app.projects_list))
 
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
+
         # boards shows empty state since active_project_id is now None
         self._refresh_from_state()
 
@@ -279,6 +324,11 @@ class MainWindow(QMainWindow):
         """Unarchive the project and refresh the UI."""
         self.app.unarchive_project(project_id)
         self.sidebar.refresh(list(self.app.projects_list))
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
+
         self._refresh_from_state()
 
     def _switch_project(self, project_id: str) -> None:
@@ -288,6 +338,10 @@ class MainWindow(QMainWindow):
 
         # switch to the new project and refresh the board
         self.app.switch_project(project_id)
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
         self._refresh_from_state()
 
     def _create_project(self) -> None:
@@ -313,12 +367,18 @@ class MainWindow(QMainWindow):
         # refresh the sidebar
         self.sidebar.refresh(list(self.app.projects_list))
 
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
+
         # refresh from state handles fetching and redering the board
         self._refresh_from_state()
 
     def _rename_project(self, project_id: str) -> None:
         """Handle renaming a project from the sidebar."""
         project = self.app.get_project(project_id)
+        # TODO: is that code unreachable ?
         if project is None:
             return
 
@@ -332,6 +392,11 @@ class MainWindow(QMainWindow):
 
         # refresh the sidebar to show the updated title
         self.sidebar.refresh(list(self.app.projects_list))
+
+        self._watcher.set_projects(
+            list(self.app.state.projects.projects_by_id.values()),
+            self.app.state.settings.projects_dir,
+        )
 
         # refresh the board state to see the error_banner
         # if there is an error with the project after renaming

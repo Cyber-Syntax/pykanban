@@ -166,3 +166,13 @@ class KanbanApp:
                 ),
             }
         )
+
+    def apply_external_changes(
+        self, changed: list[Path], deleted: list[Path]
+    ) -> None:
+        """Relay external file changes to ProjectManager."""
+        self.projects.apply_external_changes(changed, deleted)
+
+    def handle_project_folder_deleted(self, folder_path: Path) -> None:
+        """Relay an externaly deleted project folder to ProjectManager."""
+        self.projects.handle_project_folder_deleted(folder_path)
