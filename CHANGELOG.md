@@ -24,3 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added kanban board labeling functionality to show how many tasks are in each column.
 - Added column functionality to hide/show more than 10 tasks on DONE column.
 - Added task card styling to show task description/status/priority and subtasks progress bar.
+- Added background watcher to be able to detect external changes (e.g neovim
+  change the task file, delete etc.).
+    - External changes while PyKanban is running are not supported and discouraged, use with caution.
+        - This technically works for partial changes like editing task status/priority but I couldn't support it fully which there is a lot of edge cases to handle.
+    - External changes while PyKanban is not running are partially supported but it is still experimental.
+        - Make sure to use the same schema as the one used by PyKanban to avoid conflicts.
