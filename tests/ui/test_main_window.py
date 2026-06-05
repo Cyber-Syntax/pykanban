@@ -25,6 +25,10 @@ def mock_app():
     mock_app.state.projects.active_project_id = None
     mock_app.state.errors = []
 
+    # Provide settings with a valid projects_dir (Path)
+    mock_app.state.settings = MagicMock()
+    mock_app.state.settings.projects_dir = Path("/fake/projects")
+
     # Default board used by _refresh_from_state()
     mock_board = MagicMock()
     mock_board.columns = {}
@@ -35,6 +39,7 @@ def mock_app():
     created_project.project_id = "test-project-123"
     created_project.title = "Test Project"
     created_project.archived = False
+    created_project.folder_path = Path("/fake/project_folder")
     mock_app.projects.create_project.return_value = created_project
 
     # Sidebar and project helpers that tests often override per-case
@@ -53,6 +58,7 @@ def mock_project():
     mock_project.project_id = "test-project-123"
     mock_project.title = "Test Project"
     mock_project.archived = False
+    mock_project.folder_path = Path("/fake/project_folder")
     return mock_project
 
 
@@ -128,6 +134,7 @@ def test_main_window_rename_project_refreshes_board(mock_app, mocker) -> None:
     mock_project.project_id = "test-project-123"
     mock_project.title = "Existing Project"
     mock_project.archived = False
+    mock_project.folder_path = Path("/fake/project_folder")
     mock_app.get_project.return_value = mock_project
 
     # State flags required for rendering UI transitions
@@ -166,6 +173,7 @@ def test_rename_project_shows_error_banner_immediately(mock_app, mocker):
     mock_project.project_id = "p1"
     mock_project.title = "Old"
     mock_project.archived = False
+    mock_project.folder_path = Path("/fake/project_folder")
     mock_app.get_project.return_value = mock_project
 
     mock_app.state.projects.active_project_id = "p1"
@@ -352,6 +360,7 @@ def test_delete_last_project_clears_board_when_no_replacement(
     only_project.project_id = "p1"
     only_project.title = "Only Project"
     only_project.archived = False
+    only_project.folder_path = Path("/fake/project_folder")
 
     mock_app.state.projects.projects_by_id = {"p1": only_project}
     mock_app.state.projects.active_project_id = "p1"
@@ -508,6 +517,7 @@ def test_delete_project_cancel_returns_without_mutating_state(
     project.project_id = "p1"
     project.title = "Project One"
     project.archived = False
+    project.folder_path = Path("/fake/project_folder")
 
     mock_app.state.projects.projects_by_id = {"p1": project}
     mock_app.projects_list = [project]
@@ -539,6 +549,7 @@ def test_archive_project_confirm_clears_editor_refreshes_sidebar_and_board(
     project.project_id = "p1"
     project.title = "Project One"
     project.archived = False
+    project.folder_path = Path("/fake/project_folder")
 
     mock_app.get_project.return_value = project
     mock_app.projects_list = [project]
@@ -588,6 +599,7 @@ def test_archive_project_cancel_does_not_mutate_state(
     project.project_id = "p1"
     project.title = "Project One"
     project.archived = False
+    project.folder_path = Path("/fake/project_folder")
 
     mock_app.get_project.return_value = project
     mock_app.projects_list = [project]
@@ -623,6 +635,7 @@ def test_unarchive_project_refreshes_sidebar_and_board(
     project.project_id = "p1"
     project.title = "Archived Project"
     project.archived = True
+    project.folder_path = Path("/fake/project_folder")
 
     mock_app.get_project.return_value = project
     mock_app.projects_list = [project]
@@ -668,6 +681,7 @@ def test_switch_project_clears_editor_calls_switch_and_refreshes_board(
     project.project_id = "p1"
     project.title = "Project P1"
     project.archived = False
+    project.folder_path = Path("/fake/project_folder")
 
     mock_app.get_project.return_value = project
     mock_app.state.projects.projects_by_id = {"p1": project}
@@ -711,6 +725,7 @@ def test_switch_project_shows_empty_board_when_no_active_project_after_switch(
     project.project_id = "p2"
     project.title = "Project P2"
     project.archived = False
+    project.folder_path = Path("/fake/project_folder")
 
     mock_app.get_project.return_value = project
     mock_app.state.projects.projects_by_id = {"p2": project}
@@ -750,6 +765,7 @@ def test_switch_project_clears_editor_before_switch_call(
     project.project_id = "p3"
     project.title = "Project P3"
     project.archived = False
+    project.folder_path = Path("/fake/project_folder")
 
     mock_app.get_project.return_value = project
     mock_app.state.projects.projects_by_id = {"p3": project}
@@ -776,26 +792,3 @@ def test_switch_project_clears_editor_before_switch_call(
     window._switch_project("p3")
 
     assert call_order == ["clear", "switch:p3"]
-
-
-# TODO: write tests for unarchive and switch project,delete task
-
-# rename_project if not exist?
-# rename_project with empty title?
-# rename_project with same title as another project?
-# create_project with empty title?
-# create_project with same title as another project?
-# unarchive_project that doesn't exist?
-# unarchive_project that isn't archived?
-# switch_project that doesn't exist?
-# switch_project with unsaved changes in the editor?
-# delete_task that doesn't exist?
-# delete_task with unsaved changes in the editor?
-# delete_task that is currently being edited?
-# delete_task that is in a different project than the active one?
-# delete_task that is in the active project but not currently visible on the board?
-# delete_task that is in the active project and currently visible on the board?
-
-# need to cover for all of them for extarnal file changes:
-# might be lose by user deleted the file via neovim or terminal while our
-# app is running.
