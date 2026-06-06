@@ -6,9 +6,12 @@ import os
 from typing import TYPE_CHECKING
 
 from pykanban.exceptions import WriteError
+from pykanban.logger import get_logger
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+logger = get_logger(__name__)
 
 
 def atomic_write(path: Path, content: str) -> None:
@@ -26,24 +29,54 @@ def atomic_write(path: Path, content: str) -> None:
     Raises:
         WriteError: Wraps any OSError that occurs during the write or rename step.
     """
+    logger.debug(
+        "atomic_write: path=%s, content_size=%s",
+        path,
+        len(content),
+    )
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.debug(
+            "atomic_write: created parent dir: path=%s",
+            tmp_path.parent,
+        )
+
         with tmp_path.open("w", encoding="utf-8") as f:
             f.write(content)
             f.flush()
+            logger.debug(
+                "atomic_write: wrote content to tmp file: path=%s",
+                tmp_path,
+            )
             # fsync ensures the data survives a power loss before the rename
             os.fsync(f.fileno())
+
         # Path.replace() is the pathlib eqivalent of os.replace
         tmp_path.replace(path)
-    # TODO: add it to logging when logger is implemented
+        logger.debug(
+            "atomic_write: replaced original file: path=%s",
+            path,
+        )
     except OSError as e:
-        # try to cleanup tmp file if it exists
+        logger.exception(
+            "atomic_write: path=%s, content_size=%s",
+            path,
+            len(content),
+        )
+        # try to remove tmp file if it exists - best practice
         try:
             if tmp_path.exists():
+                logger.debug(
+                    "atomic_write: removing tmp file: path=%s",
+                    tmp_path,
+                )
                 tmp_path.unlink()
         except OSError:
-            # ignore cleanup failure to be able to report the WriteError
-            # We try to delete it, but if we can't, we accept the failure and move on.
-            pass
+            logger.exception(
+                "atomic_write: failed to remove tmp file: path=%s",
+                tmp_path,
+            )
+            # cleanup failure shouldn't prevent the WriteError from being raised
+
         raise WriteError(path=path, reason=str(e)) from e

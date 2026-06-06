@@ -190,3 +190,6 @@ show_error_codes = true
 # this mostly give error for PySide6 imports which false-positive
 reportMissingImports = "none"
 reportMissingTypeStubs = "none"
+
+# supress relative import errors
+extraPaths = ["src"]

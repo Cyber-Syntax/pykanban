@@ -28,6 +28,8 @@ from pykanban.ui.task_editor import TaskEditorPanel
 from pykanban.watcher import Watcher
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pykanban.app import KanbanApp
 
 

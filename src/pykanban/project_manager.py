@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from pykanban.error import ConflictWarning, ParseError
 from pykanban.exceptions import WriteError
+from pykanban.logger import get_logger
 from pykanban.models import Project
 from pykanban.parser import parse_project, parse_task, write_project
 from pykanban.project_utils import (
@@ -32,6 +33,8 @@ from pykanban.utils import generate_project_id, slugify
 
 if TYPE_CHECKING:
     from pykanban.state import AppState
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -63,17 +66,32 @@ def scan_project_folder(
     changed: list[Path] = []
 
     # TODO: write tests
+    logger.debug("Scanning project folder: %s", project_folder)
     for path in project_folder.rglob("*.md"):
         try:
             mtime = path.stat().st_mtime
         except OSError:
+            # a single file that can't be accessed shouldn't prevent
+            # the whole scan (e.g. a sync tool that locked the file that would
+            # be fine a moment later). Best effort: log the error and continue.
+            logger.warning(
+                "Could not stat file %s, skipping %s", path, exc_info=True
+            )
             continue
         current[path] = mtime
         if previous.get(path) != mtime:
+            logger.debug("Changed file: %s", path)
             changed.append(path)
 
     deleted = [path for path in previous if path not in current]
     conflict = list(project_folder.rglob(".sync-conflict-*"))
+
+    logger.info(
+        "Scan completed: %d changed, %d deleted, %d conflict",
+        len(changed),
+        len(deleted),
+        len(conflict),
+    )
 
     return ScanResult(
         changed_paths=changed,
@@ -94,6 +112,7 @@ class ProjectManager:
         """
         self.state: AppState = state
 
+    # TODO: too many branches, refactor with helper functions
     def startup_scan(self, projects_dir: Path) -> None:
         """Scan all project folders on startup and populate stores.
 
@@ -104,6 +123,8 @@ class ProjectManager:
         Args:
             projects_dir: project directory
         """
+        logger.debug("Startup scan for projects directory: %s", projects_dir)
+
         self.state.tasks = TaskStore()
         self.state.projects = ProjectStore()
         self.state.errors = []
@@ -111,10 +132,17 @@ class ProjectManager:
 
         # dir may not exist; removed/deleted
         if not projects_dir.exists():
+            logger.warning(
+                "Projects directory does not exist: %s", projects_dir
+            )
+            logger.warning("Creating projects directory: %s", projects_dir)
             # recreate the empty directory, so the app doesn't crash
             try:
                 projects_dir.mkdir(parents=True, exist_ok=True)
             except OSError as e:
+                logger.exception(
+                    "Failed to create projects directory: %s", projects_dir
+                )
                 self.state.errors.append(
                     ParseError(
                         path=projects_dir,
@@ -131,6 +159,10 @@ class ProjectManager:
             # show error_banner warning that we created empty dir for user
             # but that's uncommon that something probably went wrong
             else:
+                logger.warning(
+                    "Projects directory not found. Created an empty projects directory: %s",
+                    projects_dir,
+                )
                 self.state.errors.append(
                     ParseError(
                         path=projects_dir,
@@ -167,6 +199,7 @@ class ProjectManager:
         active = choose_active_project(self.state.projects.projects_by_id)
         # show error_banner if there are no projects found:
         if active is None:
+            logger.warning("No active project found")
             self.state.errors.append(
                 ParseError(
                     path=projects_dir,
@@ -202,6 +235,9 @@ class ProjectManager:
                 project_tasks.tasks_by_id,
             )
 
+        logger.info("Loaded %d projects folders", len(folders_to_scan))
+
+        logger.debug("Active project: %s", active.project_id)
         self.state.projects.set_active(active.project_id)
         # Record conflicts from ALL projects, not just the active one
         conflicts = find_all_project_conflicts(
@@ -219,12 +255,14 @@ class ProjectManager:
         Returns:
             The created project.
         """
+        logger.debug("Creating project: %s", title)
         project_id = generate_project_id(self.state.projects)
         folder = self.state.settings.projects_dir / slugify(title)
 
         # TODO: implement a dialog or error_banner that show the warning to user
         # prevent same project folder creation with same title
         if folder.exists():
+            logger.warning("Project folder already exists: %s", folder)
             raise ValueError(
                 f"A project folder with the name '{folder.name}' already exists. Please choose a different title."
             )
@@ -247,10 +285,12 @@ class ProjectManager:
 
         self.state.projects.put(project)
 
+        logger.info("Project created: %s", project_id)
         # TODO: write tests
         try:
             write_project(project)
         except WriteError as e:
+            logger.exception("Failed to write project: %s", project_id)
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
         return project
@@ -263,12 +303,14 @@ class ProjectManager:
             project_id: Project ID to rename.
             new_title: New title for the project.
         """
+        logger.debug("Renaming project: %s -> %s", project_id, new_title)
         project = self.state.projects.projects_by_id[project_id]
         old_folder = project.folder_path
         new_folder = old_folder.parent / slugify(new_title)
 
         # prevent same project folder creation with same title
         if new_folder.exists():
+            logger.warning("Folder already exists: %s", new_folder)
             self.state.errors.append(
                 ParseError(
                     path=new_folder,
@@ -280,11 +322,13 @@ class ProjectManager:
         try:
             shutil.move(str(old_folder), str(new_folder))
         except OSError as e:
+            logger.exception("Failed to move folder: %s", old_folder)
             self.state.errors.append(
                 ParseError(path=old_folder, reason=str(e))
             )
             return
 
+        logger.info("Renamed project: %s -> %s", old_folder, new_folder)
         project.folder_path = new_folder
         project.title = new_title.strip()
         project.updated = datetime.now()
@@ -292,7 +336,10 @@ class ProjectManager:
         try:
             write_project(project)
         except WriteError as e:
+            logger.exception("Failed to write project: %s", project_id)
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
+
+        logger.info("Updated project: %s", project_id)
 
     def delete_project(self, project_id: str) -> None:
         """Permanently delete a project folder and remove it from the memory.
@@ -304,6 +351,7 @@ class ProjectManager:
         Args:
             project_id: Project ID to delete.
         """
+        logger.debug("Deleting project: %s", project_id)
         project = self.state.projects.projects_by_id.get(project_id)
         if project is None:
             return
@@ -311,6 +359,9 @@ class ProjectManager:
         try:
             shutil.rmtree(str(project.folder_path))
         except OSError as e:
+            logger.exception(
+                "Failed to delete folder: %s", project.folder_path
+            )
             self.state.errors.append(
                 ParseError(path=project.folder_path, reason=str(e))
             )
@@ -323,6 +374,7 @@ class ProjectManager:
         if self.state.projects.active_project_id != project_id:
             return
 
+        logger.debug("Finding replacement for deleted project: %s", project_id)
         # find a non-archived replacement project
         replacement = None
         for p in self.state.projects.projects_by_id.values():
@@ -335,6 +387,10 @@ class ProjectManager:
                 # Attempt to switch to the replacement (this may raise)
                 self.switch_project(replacement.project_id)
             except Exception as e:
+                logger.exception(
+                    "Failed to switch to replacement project: %s",
+                    replacement.project_id,
+                )
                 # Record the failure for the UI and clear state to a safe empty state
                 self.state.errors.append(
                     ParseError(
@@ -347,10 +403,21 @@ class ProjectManager:
                 )
                 self.state.projects.active_project_id = None
                 self.state.tasks.tasks_by_id.clear()
+            logger.info(
+                "Switched to replacement project: %s", replacement.project_id
+            )
         else:
+            logger.info("No replacement project found for: %s", project_id)
             # no non-archived projects left — clear active and tasks
             self.state.projects.active_project_id = None
             self.state.tasks.tasks_by_id.clear()
+
+        logger.info("Deleted project: %s", project_id)
+        logger.debug(
+            "Deleted project cleared from memory: %s, active_project_id=%s",
+            project_id,
+            self.state.projects.active_project_id,
+        )
 
     def archive_project(self, project_id: str) -> None:
         """Archive a project by moving it to archive/.
@@ -363,6 +430,7 @@ class ProjectManager:
         Args:
             project_id: Project ID to archive.
         """
+        logger.debug("Archiving project: %s", project_id)
         project = self.state.projects.projects_by_id[project_id]
         archive_root = self.state.settings.projects_dir / "archive"
         archive_root.mkdir(parents=True, exist_ok=True)
@@ -371,6 +439,7 @@ class ProjectManager:
         try:
             shutil.move(str(project.folder_path), str(new_folder))
         except OSError as e:
+            logger.exception("Failed to move folder: %s", project.folder_path)
             self.state.errors.append(
                 ParseError(path=project.folder_path, reason=str(e))
             )
@@ -383,14 +452,22 @@ class ProjectManager:
         try:
             write_project(project)
         except WriteError as e:
+            logger.exception("Failed to write project: %s", e.path)
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
 
         # free task memory when the archived project was the active one.
-        # the projecto object is intentionally kept in projects_by_id
+        # the project object is intentionally kept in projects_by_id
         # so the side bar can still render its title in the archived section
         if self.state.projects.active_project_id == project_id:
             self.state.projects.active_project_id = None
             self.state.tasks = TaskStore()
+
+        logger.info("Archived project: %s", project_id)
+        logger.debug(
+            "Archived project cleared from memory: %s, active_project_id=%s",
+            project_id,
+            self.state.projects.active_project_id,
+        )
 
     def unarchive_project(self, project_id: str) -> None:
         """Unarchive a project by moving it back to projects root.
@@ -398,6 +475,7 @@ class ProjectManager:
         Args:
             project_id: Project ID to unarchive.
         """
+        logger.debug("Unarchiving project: %s", project_id)
         project = self.state.projects.projects_by_id[project_id]
         archived_projects = self.state.settings.projects_dir / "archive"
         archived_folder_path = archived_projects / project.folder_path.name
@@ -408,6 +486,7 @@ class ProjectManager:
         try:
             shutil.move(str(archived_folder_path), str(project_folder_path))
         except OSError as e:
+            logger.exception("Failed to move folder: %s", archived_folder_path)
             self.state.errors.append(
                 ParseError(path=project.folder_path, reason=str(e))
             )
@@ -420,7 +499,10 @@ class ProjectManager:
         try:
             write_project(project)
         except WriteError as e:
+            logger.exception("Failed to write project: %s", e.path)
             self.state.errors.append(ParseError(path=e.path, reason=e.reason))
+
+        logger.info("Unarchived project: %s", project_id)
 
     def switch_project(self, project_id: str) -> BoardView:
         """Switch the active project.
@@ -431,6 +513,7 @@ class ProjectManager:
         Args:
             project_id: Project ID to activate.
         """
+        logger.debug("Switching project: %s", project_id)
         project = self.state.projects.projects_by_id[project_id]
         self.state.projects.set_active(project_id)
         self.state.tasks = TaskStore()
@@ -445,6 +528,7 @@ class ProjectManager:
         for path in scan.changed_paths:
             task = parse_task(path)
             if isinstance(task, ParseError):
+                logger.error("Failed to parse task %s: %s", path, task.reason)
                 self.state.errors.append(task)
                 continue
             self.state.tasks.put(task)
@@ -453,7 +537,10 @@ class ProjectManager:
         # Extract task_id from path if possible (for reconciliation)
         # Deleted paths no longer exist, so we just let reconcile_order clean them up
         for path in scan.deleted_paths:
-            pass
+            logger.debug(
+                "Deleted task - will be cleaned up by reconcile_order - %s",
+                path,
+            )
 
         project.column_order = reconcile_order(
             project.column_order,
@@ -463,7 +550,14 @@ class ProjectManager:
 
         # Record conflicts from scan result
         for path in scan.conflict_paths:
+            logger.debug("Conflict path: %s", path)
             self.state.errors.append(ConflictWarning(path=path))
+
+        logger.debug(
+            "Switched project: project_id=%s, active_project_id=%s",
+            project_id,
+            self.state.projects.active_project_id,
+        )
 
     def apply_external_changes(
         self, changed: list[Path], deleted: list[Path]
@@ -478,6 +572,11 @@ class ProjectManager:
             changed: md files that are new or modified
             deleted: md files that no longer exist on disk
         """
+        logger.debug(
+            "Apply external changes: changed=%s, deleted=%s",
+            len(changed),
+            len(deleted),
+        )
         # may raise if no active
         active = self.state.projects.get_active()
 
@@ -485,21 +584,37 @@ class ProjectManager:
         for path in changed:
             task = parse_task(path)
             if isinstance(task, ParseError):
+                logger.warning("Parse error: %s", task)
                 self.state.errors.append(task)
                 continue
 
             # remove task from column order if status changed
             old_task = self.state.tasks.tasks_by_id.get(task.id)
             if old_task is not None and old_task.status != task.status:
+                logger.debug(
+                    "Status changed: old=%s, new=%s",
+                    old_task.status,
+                    task.status,
+                )
                 active.column_order = remove_from_columns(
                     active.column_order, task.id
                 )
                 active.column_order = insert_into_column(
                     active.column_order, task.status.value, task.id
                 )
+            else:
+                logger.debug(
+                    "Task re-parse without status unchanged: %s", task.id
+                )
 
             # add/update task in memory
             self.state.tasks.put(task)
+
+        logger.debug(
+            "Applied external changes: changed=%s, deleted=%s",
+            len(changed),
+            len(deleted),
+        )
 
         # TODO: this is so nested and hard to read, refactor to better flat structure
         deleted_ids: set[str] = set()
@@ -507,12 +622,14 @@ class ProjectManager:
             # match by path -> task id(filename pattern: slug--id.md)
             stem = path.stem  # e.g "learn-pykanban--a3f9c1b2"
             if "--" not in stem:
+                logger.debug("Skipping task: %s", stem)
                 continue
 
             task_id = stem.rsplit("--", 1)[-1]
             task = self.state.tasks.tasks_by_id.get(task_id)
 
             if task is not None:
+                logger.debug("Found task: %s", task_id)
                 # task still exist in memory. check whether its current
                 # expected path differs from the deleted path -- if so,
                 # this deletion was caused by an internal rename (TaskManager
@@ -524,8 +641,12 @@ class ProjectManager:
                     active.folder_path, task.title, task_id
                 )
                 if expected_path != path:
+                    logger.debug(
+                        "Expected path mismatch: expected=%s, actual=%s",
+                        expected_path,
+                        path,
+                    )
                     continue
-
                 # expected path matches deleted path: the file is truly gone
                 # externally (not a rename), so remove it from memory.
                 self.state.tasks.remove(task_id)
@@ -533,13 +654,22 @@ class ProjectManager:
                 self.state.errors.append(
                     ParseError(path=path, reason="File deleted externally")
                 )
+                logger.info("Deleted task: %s", path)
 
+        logger.debug(
+            "Reconciling column order after external deletions: deleted_ids=%s",
+            deleted_ids,
+        )
         # reconcile column order (drops stale IDs, re-places orphans)
         if deleted_ids:
             active.column_order = reconcile_order(
                 active.column_order,
                 set(self.state.tasks.tasks_by_id.keys()),
                 self.state.tasks.tasks_by_id,
+            )
+        else:
+            logger.debug(
+                "No deleted IDs, skipping column order reconciliation."
             )
 
     def handle_project_folder_deleted(self, folder_path: Path) -> None:
@@ -548,6 +678,10 @@ class ProjectManager:
         Args:
             folder_path: folder that no longer exists on disk.
         """
+        logger.debug(
+            "Project folder deleted externally: folder_path=%s",
+            folder_path,
+        )
         project = next(
             (
                 p
@@ -557,6 +691,10 @@ class ProjectManager:
             None,
         )
         if project is None:
+            logger.debug(
+                "No project found for deleted folder: folder_path=%s",
+                folder_path,
+            )
             return
 
         self.state.errors.append(
@@ -566,10 +704,23 @@ class ProjectManager:
             )
         )
 
+        logger.debug(
+            "Project removed externally, so we remove it from memory: project_id=%s",
+            project.project_id,
+        )
         # remove from memory so sidebar no longer shows it
         del self.state.projects.projects_by_id[project.project_id]
 
         # if it was active, clear active state and tasks
         if self.state.projects.active_project_id == project.project_id:
+            logger.debug(
+                "Project was active, clearing active state and tasks: project_id=%s",
+                project.project_id,
+            )
             self.state.projects.active_project_id = None
             self.state.tasks = TaskStore()
+        else:
+            logger.debug(
+                "Project was not active, no need to clear active state and tasks: project_id=%s",
+                project.project_id,
+            )

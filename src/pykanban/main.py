@@ -14,6 +14,7 @@ from pykanban.config import (
     Settings,
     load_settings,
 )
+from pykanban.logger import setup_logging
 from pykanban.ui.main_window import MainWindow
 from pykanban.ui.settings_dialog import SettingsDialog
 
@@ -21,6 +22,7 @@ from pykanban.ui.settings_dialog import SettingsDialog
 _DATA_DIR = Path(__file__).parent / "data"
 
 
+# TODO: move below functions to config.py
 def ensure_config_dir() -> None:
     """Ensure the config directory exists."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -93,6 +95,9 @@ def main() -> int:
 
     # Bootstrap the settings and determine if this is the first run
     settings, is_first_run = bootstrap_settings()
+
+    # initialize logging
+    setup_logging(settings.log_level)
 
     # Seed the template if this is the first run
     if is_first_run:

@@ -6,10 +6,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pykanban.error import ConflictWarning, ParseError
+from pykanban.logger import get_logger
 from pykanban.models import Project, Status, Task
+from pykanban.parser import parse_task
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -50,13 +54,20 @@ def choose_active_project(
     Returns:
         The selected project or None if no projects exist.
     """
+    logger.debug(
+        "Choosing active project from %s projects", len(projects_dict)
+    )
     if not projects_dict:
+        logger.debug("No projects found")
         return None
 
     for project in projects_dict.values():
         if not project.archived:
+            logger.debug("Found active project: %s", project.project_id)
             return project
+        logger.debug("Project %s is archived", project.project_id)
 
+    logger.info("No active projects found")
     return next(iter(projects_dict.values())) if projects_dict else None
 
 
@@ -69,9 +80,13 @@ def find_sync_conflicts(folder: Path) -> list[ConflictWarning]:
     Returns:
         A list of ConflictWarning objects for each conflict file found.
     """
-    conflicts = []
-    for path in folder.rglob(".sync-conflict-*"):
-        conflicts.append(ConflictWarning(path=path))
+    logger.debug("Finding sync conflicts in %s", folder)
+    conflicts: list[ConflictWarning] = [
+        ConflictWarning(path=path) for path in folder.rglob(".sync-conflict-*")
+    ]
+    if conflicts:
+        logger.debug("Found %s sync conflicts", len(conflicts))
+
     return conflicts
 
 
@@ -86,9 +101,12 @@ def find_all_project_conflicts(
     Returns:
         A list of ConflictWarning objects from all projects.
     """
-    all_conflicts = []
+    logger.debug("Finding all project conflicts")
+    all_conflicts: list[ConflictWarning] = []
     for project in projects_dict.values():
         all_conflicts.extend(find_sync_conflicts(project.folder_path))
+    if all_conflicts:
+        logger.warning("Found %s project conflicts", len(all_conflicts))
     return all_conflicts
 
 
@@ -110,6 +128,7 @@ def reconcile_order(
         New column_order with stale IDs dropped and missing IDs appended to
         the column matching each task's status.
     """
+    logger.debug("Reconciling order for %s known IDs", len(known_ids))
     # Drop IDs that no longer exist on disk
     result: dict[str, list[str]] = {}
     for status_key, id_list in column_order.items():
@@ -126,6 +145,7 @@ def reconcile_order(
         task = tasks_by_id.get(task_id)
         if task:
             result.setdefault(task.status.value, []).append(task_id)
+    logger.info("Appended %s missing IDs", len(known_ids) - len(present))
 
     return result
 
@@ -147,8 +167,7 @@ def load_project_tasks(
         ProjectTasksLoadResult containing loaded task IDs, parse errors,
         and an updated mtime cache.
     """
-    from pykanban.parser import parse_task
-
+    logger.debug("Loading tasks for project %s", project.project_id)
     cache: dict[Path, float] = mtime_cache or {}
     loaded_tasks: list[Task] = []
     loaded_task_ids: set[str] = set()
@@ -157,6 +176,7 @@ def load_project_tasks(
     for md_file in project.folder_path.rglob("*.md"):
         task = parse_task(md_file)
         if isinstance(task, ParseError):
+            logger.error("Failed to parse task %s: %s", md_file, task.reason)
             errors.append(task)
             continue
 
@@ -167,8 +187,14 @@ def load_project_tasks(
         try:
             cache[md_file] = md_file.stat().st_mtime
         except OSError:
-            # File disappeared between rglob and stat; skip silently
-            pass
+            # File disappeared between rglob and stat; log and skip
+            logger.debug("Failed to stat file %s", md_file, exc_info=True)
+
+    logger.info(
+        "Loaded %d tasks from project %s",
+        len(loaded_tasks),
+        project.project_id,
+    )
 
     return ProjectTasksLoadResult(
         loaded_tasks=loaded_tasks,

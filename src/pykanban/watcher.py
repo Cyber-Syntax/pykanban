@@ -12,7 +12,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QTimer, Signal
 
+from pykanban.logger import get_logger
 from pykanban.models import Project
+
+logger = get_logger(__name__)
 
 
 class Watcher(QObject):
@@ -101,12 +104,25 @@ class Watcher(QObject):
             for f in p.folder_path.rglob("*.md")
         ]
 
+        logger.debug(
+            "Registering watches: %d diretor(ies), %d file(s)",
+            len(dirs),
+            len(files),
+        )
+
         failed_dirs = self._fs_watcher.addPaths(dirs)
         failed_files = self._fs_watcher.addPaths(files)
 
         if failed_dirs or failed_files:
             # file system watch register failed, probably because
             # of system inotify limit has been reached
+            logger.warning(
+                "Failed to register watches: %d diretor(ies), %d file(s)",
+                "falling back to polling mode every %d ms",
+                len(failed_dirs),
+                len(failed_files),
+                self._POLL_INTERVAL_MS,
+            )
 
             # seed the cache and switch to polling mode
             self._seed_mtime_cache()
@@ -127,6 +143,7 @@ class Watcher(QObject):
         deleted files, and removed project folders.
         """
         folder = Path(path)
+        logger.debug("Directory changed: %s", path)
 
         # TODO: find alternative for nested statements
         # check if any project folder disappeared
@@ -138,6 +155,9 @@ class Watcher(QObject):
 
         # ignore notify for dir that no longer exist
         if not folder.exists():
+            logger.warning(
+                "Ignoring change for non-existent directory: %s", path
+            )
             return
 
         self._scan_folder(folder)
@@ -148,6 +168,7 @@ class Watcher(QObject):
 
         # if the file no longer exist, treat it as a deletion event
         if not p.exists():
+            logger.debug("File deleted: %s", path)
             self.changes_detected.emit([], [p])
             return
 
@@ -157,6 +178,7 @@ class Watcher(QObject):
         # and recreated, even if the path remains the same
         self._fs_watcher.addPath(path)
 
+        logger.debug("File modified: %s", path)
         self.changes_detected.emit([p], [])
 
     def _poll_all(self) -> None:
@@ -179,6 +201,7 @@ class Watcher(QObject):
                     mtime = f.stat().st_mtime
                 except OSError:
                     # ignore files that become inaccessible while scanning
+                    logger.warning("Failed to stat file: %s", f)
                     continue
 
                 # stores dict for current path modification time state
@@ -209,6 +232,11 @@ class Watcher(QObject):
 
         # check are those include any file, emit if any of the list exist
         if changed or deleted:
+            logger.debug(
+                "Poll detected %d changed and %d deleted file(s)",
+                len(changed),
+                len(deleted),
+            )
             self.changes_detected.emit(changed, deleted)
 
     def _scan_folder(self, folder: Path) -> None:
@@ -236,16 +264,22 @@ class Watcher(QObject):
             self._fs_watcher.addPaths([str(f) for f in new_or_modified])
 
         if new_or_modified or deleted:
+            logger.debug(
+                "Folder scan of '%s': %d new/modified, %d deleted",
+                folder,
+                len(new_or_modified),
+                len(deleted),
+            )
             self.changes_detected.emit(new_or_modified, deleted)
 
     def _seed_mtime_cache(self) -> None:
         """Populate the modification time cache for polling mode."""
         for project in self._watched_projects:
             for f in project.folder_path.rglob("*.md"):
-                # TODO: add logging after logger implementation
                 try:
                     self._mtime_cache[f] = f.stat().st_mtime
                 except OSError:
-                    # ignore files that cannot be accessed during
-                    # cache initialization
-                    pass
+                    logger.warning(
+                        "Could not stat file during cache init, skipping: %s",
+                        f,
+                    )

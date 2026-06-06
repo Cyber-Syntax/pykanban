@@ -9,13 +9,16 @@ from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from pykanban import file_handler
 from pykanban.error import ParseError
 from pykanban.exceptions import WriteError  # noqa: F401 — re-raised by callers
+from pykanban.file_handler import atomic_write
+from pykanban.logger import get_logger
 from pykanban.models import Priority, Project, Status, Task
 from pykanban.utils import flow_id_list
 
 yaml = YAML()
+
+logger = get_logger(__name__)
 
 
 def parse_task(path: Path) -> Task | ParseError:
@@ -27,26 +30,40 @@ def parse_task(path: Path) -> Task | ParseError:
     Returns:
         Task on success, ParseError on any failure.
     """
+    logger.debug("Parsing task from %s", path)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as e:
+        logger.exception("Failed to read file %s", path)
         return ParseError(path=path, reason=str(e))
 
     if not text.startswith("---\n"):
+        logger.error("Missing YAML front matter in %s", path)
         return ParseError(path=path, reason="Missing YAML front matter")
 
     _, _, rest = text.partition("---\n")
     frontmatter, sep, raw_body = rest.partition("---\n")
     if not sep:
+        logger.error("Missing closing YAML front matter in %s", path)
         return ParseError(
             path=path, reason="Missing closing YAML front matter"
         )
 
+    logger.debug("Parsing YAML front matter in %s", path)
     try:
         data = yaml.load(frontmatter)
     except YAMLError as e:
+        logger.exception("YAML parsing error in %s", path)
         return ParseError(path=path, reason=f"YAML parsing error: {e}")
 
+    # make sure yaml front matter isn't empty
+    if not isinstance(data, dict):
+        logger.error("YAML front matter is not a mapping in %s", path)
+        return ParseError(
+            path=path, reason="YAML front matter must be a mapping"
+        )
+
+    logger.debug("Validating fields in %s", path)
     for field in (
         "id",
         "schema",
@@ -57,6 +74,7 @@ def parse_task(path: Path) -> Task | ParseError:
         "updated",
     ):
         if field not in data:
+            logger.error("Missing required field %s in %s", field, path)
             return ParseError(
                 path=path, reason=f"Missing required field: {field}"
             )
@@ -64,6 +82,7 @@ def parse_task(path: Path) -> Task | ParseError:
     try:
         status = Status(str(data["status"]))
     except ValueError:
+        logger.exception("Invalid status value %s in %s", data["status"], path)
         return ParseError(
             path=path, reason=f"Invalid status value: {data['status']}"
         )
@@ -71,6 +90,9 @@ def parse_task(path: Path) -> Task | ParseError:
     try:
         priority = Priority(str(data["priority"]))
     except ValueError:
+        logger.exception(
+            "Invalid priority value %s in %s", data["priority"], path
+        )
         return ParseError(
             path=path, reason=f"Invalid priority value: {data['priority']}"
         )
@@ -79,6 +101,9 @@ def parse_task(path: Path) -> Task | ParseError:
         created = datetime.fromisoformat(data["created"])
         updated = datetime.fromisoformat(data["updated"])
     except ValueError as e:
+        logger.exception(
+            "Invalid datetime format %s in %s", data["created"], path
+        )
         return ParseError(path=path, reason=f"Invalid datetime format: {e}")
 
     return Task(
@@ -105,6 +130,7 @@ def write_task(task: Task, path: Path) -> None:
     Raises:
         WriteError: Propagated from atomic_write on any OS-level failure.
     """
+    logger.debug("Writing task %s to %s", task.id, path)
     task.updated = datetime.now()
     data = {
         "id": task.id,
@@ -118,7 +144,7 @@ def write_task(task: Task, path: Path) -> None:
     stream = StringIO()
     yaml.dump(data, stream)
     content = f"---\n{stream.getvalue().strip()}\n---\n{task.raw_body}"
-    file_handler.atomic_write(path, content)
+    atomic_write(path, content)
 
 
 def parse_project(path: Path) -> Project | ParseError:
@@ -130,16 +156,20 @@ def parse_project(path: Path) -> Project | ParseError:
     Returns:
         Project on success, ParseError on any failure.
     """
+    logger.debug("Parsing project from %s", path)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as e:
+        logger.exception("Error reading file %s", path)
         return ParseError(path=path, reason=f"Error reading file: {e}")
 
     try:
         data = yaml.load(text)
     except YAMLError as e:
+        logger.exception("YAML parsing error in %s", path)
         return ParseError(path=path, reason=f"YAML parsing error: {e}")
 
+    logger.debug("Validating fields in %s", path)
     for field in (
         "project_id",
         "schema",
@@ -150,6 +180,7 @@ def parse_project(path: Path) -> Project | ParseError:
         "column_order",
     ):
         if field not in data:
+            logger.error("Missing required field: %s in %s", field, path)
             return ParseError(
                 path=path, reason=f"Missing required field: {field}"
             )
@@ -158,6 +189,7 @@ def parse_project(path: Path) -> Project | ParseError:
         created = datetime.fromisoformat(data["created"])
         updated = datetime.fromisoformat(data["updated"])
     except ValueError as e:
+        logger.exception("Invalid datetime format in %s", path)
         return ParseError(path=path, reason=f"Invalid datetime format: {e}")
 
     return Project(
@@ -184,6 +216,7 @@ def write_project(project: Project) -> None:
     Raises:
         WriteError: Propagated from atomic_write on any OS-level failure.
     """
+    logger.debug("Writing project to %s", project.folder_path / "metadata.yml")
     project.updated = datetime.now()
     data = {
         "project_id": project.project_id,
@@ -200,7 +233,7 @@ def write_project(project: Project) -> None:
     }
     stream = StringIO()
     yaml.dump(data, stream)
-    file_handler.atomic_write(
+    atomic_write(
         project.folder_path / "metadata.yml",
         stream.getvalue().strip(),
     )
