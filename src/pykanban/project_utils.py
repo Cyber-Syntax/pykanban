@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -41,7 +42,7 @@ def empty_column_order() -> dict[str, list[str]]:
 
 
 def choose_active_project(
-    projects_dict: dict[str, Project],
+    projects_dict: Mapping[str, Project],
 ) -> Project | None:
     """Choose an initial active project.
 

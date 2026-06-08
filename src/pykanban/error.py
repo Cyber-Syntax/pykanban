@@ -23,3 +23,7 @@ class ConflictWarning:
 
     path: Path
     reason: str = "Sync conflict detected"
+
+
+# single source of truth for anything the error banner can display
+ErrorEntry = ParseError | ConflictWarning
