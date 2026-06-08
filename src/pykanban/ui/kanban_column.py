@@ -17,8 +17,12 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.app import KanbanApp
+from pykanban.logger import get_logger
 from pykanban.models import Priority, Status, Task
 from pykanban.store import BoardView
+
+logger = get_logger(__name__)
+
 
 _DONE_DEFAULT_LIMIT: int = 10
 
@@ -107,6 +111,11 @@ class KanbanColumn(QWidget):
         Args:
             tasks: Ordered list of tasks for this column.
         """
+        logger.debug(
+            "Refreshing column '%s' with %d task(s)",
+            self.status.value,
+            len(tasks),
+        )
         self._tasks = tasks
         self._rebuild_cards()
 
@@ -121,7 +130,15 @@ class KanbanColumn(QWidget):
             event: The drag-enter event provided by Qt.
         """
         if event.mimeData().hasFormat("application/x-task-id"):
+            logger.debug(
+                "dragEnterEvent accepted on column '%s'", self.status.value
+            )
             event.acceptProposedAction()
+        else:
+            logger.debug(
+                "dragEnterEvent ignored on column '%s': unexpected MIME type",
+                self.status.value,
+            )
 
     def dropEvent(self, event: QDropEvent) -> None:
         """Handle a task card being dropped into this column.
@@ -138,24 +155,55 @@ class KanbanColumn(QWidget):
         """
         mime = event.mimeData()
         if not mime.hasFormat("application/x-task-id"):
+            logger.warning(
+                "dropEvent on column '%s': missing task-id MIME data, ignoring",
+                self.status.value,
+            )
             event.ignore()
             return
 
-        task_id = mime.data("application/x-task-id").data().decode("utf-8")
-        src_status = (
-            mime.data("application/x-task-status").data().decode("utf-8")
+        # wrapping in bytes() guarantees we always have a bytes object with .decode()
+        task_id = bytes(mime.data("application/x-task-id").data()).decode(
+            "utf-8"
         )
+        src_status = bytes(
+            mime.data("application/x-task-status").data()
+        ).decode("utf-8")
         drop_pos = event.position().toPoint()
         cards_pos = self.cards_container.mapFrom(self, drop_pos)
         position = self._drop_position_index(cards_pos)
 
+        logger.debug(
+            "dropEvent: task_id=%s src_status=%s -> dst_status=%s position=%d",
+            task_id,
+            src_status,
+            self.status.value,
+            position,
+        )
+
         try:
             if src_status == self.status.value:
+                logger.info(
+                    "Reordering task '%s' within column '%s' to position %d",
+                    task_id,
+                    self.status.value,
+                    position,
+                )
                 self.app.update_task(task_id, {"position": position})
             else:
+                logger.info(
+                    "Moving task '%s' from '%s' to '%s' at position %d",
+                    task_id,
+                    src_status,
+                    self.status.value,
+                    position,
+                )
                 self.app.move_task(task_id, self.status, position=position)
         except KeyError:
-            # Task was deleted externally between drag-start and drop; skip.
+            logger.warning(
+                "dropEvent: task '%s' no longer exists (deleted externally), ignoring drop",
+                task_id,
+            )
             event.ignore()
             return
 
@@ -165,8 +213,6 @@ class KanbanColumn(QWidget):
         board = self.app.get_board()
         self.board_changed.emit(board)
 
-    # TODO: are those private methods are really needed to be private?
-    # private
     def _on_add_task(self) -> None:
         """Open the new-task prompt and create a task in this column."""
         from PySide6.QtWidgets import QInputDialog
@@ -175,8 +221,14 @@ class KanbanColumn(QWidget):
             self, "New Task", f"Task title ({self.status.value}):"
         )
         if not ok or not title.strip():
+            logger.debug("_on_add_task: user cancelled or entered blank title")
             return
 
+        logger.info(
+            "Creating new task '%s' in column '%s'",
+            title.strip(),
+            self.status.value,
+        )
         self.app.create_task(
             title=title.strip(),
             status=self.status,
@@ -197,18 +249,30 @@ class KanbanColumn(QWidget):
         """
         count = self.cards_layout.count()
         for i in range(count):
+            # itemAt returns QLayoutItem | None - guard before use
             item = self.cards_layout.itemAt(i)
+            # guard for none
+            if item is None:
+                continue
+
             widget = item.widget()
+
             if not widget:
                 continue
 
             if pos.y() < widget.geometry().center().y():
+                logger.debug("_drop_position_index: resolved to index %d", i)
                 return i
         return count
 
     def _toggle_done_list(self) -> None:
         """Toggle visibility of done tasks."""
         self._show_all_done = not self._show_all_done
+        logger.debug(
+            "_toggle_done_list: _show_all_done=%s for column '%s'",
+            self._show_all_done,
+            self.status.value,
+        )
         self._rebuild_cards()
 
     def _rebuild_cards(self) -> None:
@@ -223,7 +287,11 @@ class KanbanColumn(QWidget):
         # Remove every widget currently in the card layout
         while self.cards_layout.count():
             item = self.cards_layout.takeAt(0)
+            if item is None:
+                continue
+
             widget = item.widget()
+
             if widget:
                 widget.deleteLater()
 
@@ -231,6 +299,13 @@ class KanbanColumn(QWidget):
         tasks = self._tasks
         if self.status == Status.DONE and not self._show_all_done:
             tasks = self._tasks[-_DONE_DEFAULT_LIMIT:]
+
+        logger.debug(
+            "_rebuild_cards: rendering %d/%d task(s) in column '%s'",
+            len(tasks),
+            len(self._tasks),
+            self.status.value,
+        )
 
         # Create a card widget for each task and add it to the layout
         for task in tasks:

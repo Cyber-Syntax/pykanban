@@ -5,8 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pykanban.logger import get_logger
+
 if TYPE_CHECKING:
     from pykanban.models import Project, Status, Task
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -43,6 +47,7 @@ class ProjectStore:
         """Get the active project."""
         # TODO: better to show on error_banner
         if self.active_project_id is None:
+            logger.debug("active_project_id is not set")
             raise KeyError("active_project_id is not set")
         return self.projects_by_id[self.active_project_id]
 

@@ -18,11 +18,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pykanban.logger import get_logger
+
 if TYPE_CHECKING:
     from PySide6.QtGui import QAction
 
     from pykanban.app import KanbanApp
     from pykanban.models import Project
+
+
+logger = get_logger(__name__)
 
 
 class ProjectSidebar(QWidget):
@@ -90,6 +95,7 @@ class ProjectSidebar(QWidget):
         Args:
             projects: Projects to display.
         """
+        logger.debug("Refreshing sidebar: %d project(s)", len(projects))
         self.active_list.clear()
         self.archived_list.clear()
 
@@ -109,6 +115,9 @@ class ProjectSidebar(QWidget):
             item: Clicked list item.
         """
         project_id = cast("str", item.data(Qt.ItemDataRole.UserRole))
+        logger.info(
+            "Project selected: id=%s title=%r", project_id, item.text()
+        )
         self.project_selected.emit(project_id)
 
     def _on_active_context_menu_requested(self, pos: QPoint) -> None:
@@ -136,6 +145,11 @@ class ProjectSidebar(QWidget):
         # get project and check if archived
         project = self.app.state.projects.projects_by_id[project_id]
         is_archived = project.archived
+        logger.debug(
+            "Context menu opened for project id=%s title=%r",
+            project_id,
+            project.title,
+        )
 
         menu = QMenu(self)
         delete_action = menu.addAction("Delete project")
@@ -151,15 +165,30 @@ class ProjectSidebar(QWidget):
         action = cast(
             "QAction | None", menu.exec(list_widget.mapToGlobal(pos))
         )
+
         if action is None:
+            logger.debug("Context menu dismissed with no action")
             return
 
         # emit signal based on selected action
         if action == delete_action:
+            logger.info(
+                "Context menu: delete requested for project id=%s", project_id
+            )
             self.project_delete_requested.emit(project_id)
         elif action == archive_action:
+            logger.info(
+                "Context menu: archive requested for project id=%s", project_id
+            )
             self.project_archive_requested.emit(project_id)
         elif action == unarchive_action:
+            logger.info(
+                "Context menu: unarchive requested for project id=%s",
+                project_id,
+            )
             self.project_unarchive_requested.emit(project_id)
         elif action == rename_action:
+            logger.info(
+                "Context menu: rename requested for project id=%s", project_id
+            )
             self.project_rename_requested.emit(project_id)

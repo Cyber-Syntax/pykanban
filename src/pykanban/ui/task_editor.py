@@ -5,6 +5,8 @@ Uses PySide6 for UI rendering.
 
 from __future__ import annotations
 
+from enum import Enum
+
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
@@ -20,7 +22,10 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.app import KanbanApp
+from pykanban.logger import get_logger
 from pykanban.models import Priority, Status, Task
+
+logger = get_logger(__name__)
 
 
 class TaskEditorPanel(QWidget):
@@ -66,12 +71,17 @@ class TaskEditorPanel(QWidget):
         self._timer.stop()
 
         previous_task = self._task
+        logger.debug("Loading task: id=%s title=%r", task.id, task.title)
         if (
             previous_task is not None
             and previous_task.id != task.id
             and self.isVisible()
             and self._has_unsaved_changes(previous_task)
         ):
+            logger.debug(
+                "Flushing unsaved changes for previous task: id=%s",
+                previous_task.id,
+            )
             self._flush_changes()
 
         preserve_body_cursor = (
@@ -127,6 +137,7 @@ class TaskEditorPanel(QWidget):
     def clear(self) -> None:
         """Stop the debounce timer, flush any pending edit, then hide."""
         self._timer.stop()
+        logger.debug("Clearing editor, flushing pending changes")
         # Persist first so the task still has a valid identity in storage.
         self._flush_changes()
         self._task = None
@@ -134,6 +145,10 @@ class TaskEditorPanel(QWidget):
 
     def discard(self) -> None:
         """Hide the editor without writing current widget state back."""
+        logger.debug(
+            "Disarding editor changes for task: id=%s",
+            self._task.id if self._task else "none",
+        )
         self._timer.stop()
         self._task = None
         self.setVisible(False)
@@ -185,11 +200,18 @@ class TaskEditorPanel(QWidget):
             "priority": priority,
             "raw_body": self.body_edit.toPlainText(),
         }
+        logger.debug(
+            "Flushing task: id=%s status=%s priority=%s",
+            task.id,
+            fields["status"],
+            fields["priority"],
+        )
         self.app.tasks.update_task(task.id, fields)
         self._render_checklist(fields["raw_body"])
+        logger.debug("Task saved: id=%s", task.id)
         self.task_saved.emit()
 
-    def _populate_combo(self, combo: QComboBox, values: list) -> None:
+    def _populate_combo(self, combo: QComboBox, values: list[Enum]) -> None:
         """Populate a combo box with enum values.
 
         Args:
@@ -232,6 +254,9 @@ class TaskEditorPanel(QWidget):
         try:
             from markdown_it import MarkdownIt
         except ImportError:
+            logger.warning(
+                "markdown-it not installed, falling back to plain text preview"
+            )
             self.checklist_view.setPlainText(raw_body)
             return
 

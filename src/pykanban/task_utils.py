@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pykanban.logger import get_logger
 from pykanban.utils import slugify
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+logger = get_logger(__name__)
 
 
 def build_task_file_path(
@@ -26,7 +30,9 @@ def build_task_file_path(
         The full path to the task file.
     """
     slug = slugify(task_title)
-    return project_folder / f"{slug}--{task_id}.md"
+    file_path = project_folder / f"{slug}--{task_id}.md"
+    logger.debug("Task file path: %s", file_path)
+    return file_path
 
 
 def copy_column_order(
@@ -50,6 +56,7 @@ def copy_column_order(
         # column_name: the dict key, like "todo, doing"
         # task_ids: list of task IDs(8 char hex like ['a1bc31']) in column
         new_order[column_name] = task_ids.copy()
+    logger.debug("Copied column order with %d columns", len(new_order))
     return new_order
 
 
@@ -78,15 +85,26 @@ def insert_into_column(
 
     # Task ID already exists in the column, return unchanged
     if task_id in column:
+        logger.warning(
+            "Task ID %s already exists in column %s", task_id, status_value
+        )
         return new_column_order
 
     # Insert the task ID at the specified position
     # or append to the end if no position is given
     if position is None:
         column.append(task_id)
+        logger.debug("Appended task ID %s to column %s", task_id, status_value)
     else:
+        # lock the postion and log if it was out of range
         position = max(0, min(position, len(column)))
         column.insert(position, task_id)
+        logger.debug(
+            "Inserted task ID %s at position %d in column %r",
+            task_id,
+            position,
+            status_value,
+        )
 
     return new_column_order
 
@@ -104,13 +122,24 @@ def remove_from_columns(
         A new column_order dict with the task ID removed.
     """
     # Create a copy of the column_order dict and nested lists
-    new_column_order = {}
+    new_column_order: dict[str, list[str]] = {}
+    removed_from: list[str] = []
 
     for status_value, ids in column_order.items():
         new_ids = ids.copy()
         if task_id in new_ids:
             new_ids.remove(task_id)
+            removed_from.append(status_value)
         new_column_order[status_value] = new_ids
+
+    if removed_from:
+        logger.debug(
+            "Removed task ID %s from columns %s",
+            task_id,
+            ", ".join(removed_from),
+        )
+    else:
+        logger.debug("Task ID %s not found in any column", task_id)
 
     return new_column_order
 
@@ -139,7 +168,18 @@ def reorder_in_column(
             # Insert the task ID at the new position, ensuring it's within bounds
             position = max(0, min(position, len(ids)))
             ids.insert(position, task_id)
+            logger.debug(
+                "Task %s reordered to position %d in column %s",
+                task_id,
+                position,
+                ids,
+            )
             return new_column_order
 
+    logger.warning(
+        "Attempted to reorder task %s to position %d, but it was not found in any column.",
+        task_id,
+        position,
+    )
     # Task ID not found, return unchanged
     return new_column_order

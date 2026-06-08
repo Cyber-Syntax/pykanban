@@ -10,8 +10,12 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from pykanban.app import KanbanApp
+from pykanban.logger import get_logger
 from pykanban.models import Status
 from pykanban.ui.kanban_column import KanbanColumn
+
+logger = get_logger(__name__)
+
 
 if TYPE_CHECKING:
     from pykanban.store import BoardView, KanbanApp
@@ -47,5 +51,15 @@ class KanbanBoard(QWidget):
         Args:
             board_view: Board view mapping status to tasks.
         """
+        logger.debug("Refreshing kanban board")
+
         for status, column in self.columns.items():
-            column.refresh(board_view.columns.get(status, []))
+            tasks = board_view.columns.get(status, [])
+
+            logger.debug(
+                "Column %s: %d tasks",
+                status.name,
+                len(tasks),
+            )
+
+            column.refresh(tasks)

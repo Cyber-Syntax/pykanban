@@ -28,7 +28,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from pykanban.logger import get_logger
 from pykanban.models import Task
+
+logger = get_logger(__name__)
+
 
 # TODO: improve cards
 # use QTQuick.Controls.ComboBox for selecting status, priority... directly from card
@@ -65,6 +69,8 @@ class TaskCard(QFrame):
         """
         super().__init__(parent)
         self.task = task
+        logger.debug("TaskCard created: id=%s title=%r", task.id, task.title)
+
         self._press_pos: QPoint | None = None
         self._dragging = False
         self.setObjectName("TaskCard")
@@ -198,6 +204,7 @@ class TaskCard(QFrame):
         delete_action = menu.addAction("Delete task")
         action = menu.exec(event.globalPos())
         if action == delete_action:
+            logger.info("Delete requested for task id=%s", self.task.id)
             self.delete_requested.emit(self.task.id)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -242,6 +249,7 @@ class TaskCard(QFrame):
             event: The mouse release event.
         """
         if not self._dragging and self._press_pos is not None:
+            logger.debug("TaskCard clicked: id=%s", self.task.id)
             self.clicked.emit(self.task.id)
 
         self._press_pos = None
@@ -256,6 +264,7 @@ class TaskCard(QFrame):
         """
         # Guard: only start drag if still in dragging state and press position is set
         if not self._dragging or self._press_pos is None:
+            logger.debug("Drag started for task id=%s", self.task.id)
             return
 
         drag = QDrag(self)
@@ -269,7 +278,7 @@ class TaskCard(QFrame):
         # Create a semi-transparent pixmap of the card
         pixmap = self.grab()
         blurred = QPixmap(pixmap.size())
-        blurred.fill(Qt.transparent)
+        blurred.fill(Qt.GlobalColor.transparent)
         painter = QPainter(blurred)
         painter.setOpacity(0.5)
         painter.drawPixmap(0, 0, pixmap)

@@ -9,8 +9,12 @@ from uuid import uuid4
 from ruamel.yaml.comments import CommentedSeq
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
+from pykanban.logger import get_logger
+
 if TYPE_CHECKING:
     from pykanban.store import ProjectStore, TaskStore
+
+logger = get_logger(__name__)
 
 
 # TODO: make them pure function?
@@ -20,27 +24,46 @@ if TYPE_CHECKING:
 # and we don't want to block users with a non-unique ID error
 def generate_task_id(store: TaskStore) -> str:
     """Generate a unique task ID."""
-    for _ in range(10):
+    for attempt in range(10):
         task_id = uuid4().hex[:8]
         if task_id not in store.tasks_by_id:
+            logger.debug(
+                "Generated unique task ID: %s (attempt %d)",
+                task_id,
+                attempt + 1,
+            )
             return task_id
+        logger.warning(
+            "Task ID %s already exists, retrying... attempt %d",
+            task_id,
+            attempt + 1,
+        )
 
-    raise RuntimeError(
-        "Failed to generate a unique task ID after 10 attempts."
-    )
+    error_msg = "Failed to generate a unique task ID after 10 attempts."
+    logger.error(error_msg)
+    raise RuntimeError(error_msg)
 
 
 def generate_project_id(store: ProjectStore) -> str:
     """Generate a unique project ID."""
-    for _ in range(10):
+    for attempt in range(10):
         project_id = f"p_{uuid4().hex[:8]}"
         if project_id not in store.projects_by_id:
+            logger.debug(
+                "Generated unique project ID: %s (attempt %d)",
+                project_id,
+                attempt + 1,
+            )
             return project_id
+        logger.warning(
+            "Project ID %s already exists, retrying... attempt %d",
+            project_id,
+            attempt + 1,
+        )
 
-    # TODO: write tests
-    raise RuntimeError(
-        "Failed to generate a unique project ID after 10 attempts."
-    )
+    error_msg = "Failed to generate a unique project ID after 10 attempts."
+    logger.error(error_msg)
+    raise RuntimeError(error_msg)
 
 
 def slugify(value: str) -> str:
@@ -57,11 +80,22 @@ def slugify(value: str) -> str:
     # if a callable (e.g a method) is passed, call it to get the value
     if callable(value):
         value = value()
+        logger.debug("Slugify callable value: %s", value)
 
+    original_value = value
     # ensure we realy have a string now
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
     slug = slug.strip("-")
-    return slug or "project"
+    result = slug or "project"
+
+    if result != original_value:
+        logger.debug(
+            "Slugify result: %s (original: %s)", result, original_value
+        )
+    else:
+        logger.debug("Slugify result: %s (no change)", result)
+
+    return result
 
 
 def flow_id_list(ids: list[str]) -> CommentedSeq:
@@ -79,8 +113,10 @@ def flow_id_list(ids: list[str]) -> CommentedSeq:
     Returns:
         A CommentedSeq configured for flow-style output.1
     """
+    logger.debug("Converting IDs to flow-style YAML: ids=%s", ids)
     seq: CommentedSeq = CommentedSeq(
         [SingleQuotedScalarString(i) for i in ids]
     )
     seq.fa.set_flow_style()
+    logger.debug("Flow-style YAML sequence: %s", seq)
     return seq
