@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.app import KanbanApp
+from pykanban.logger import get_logger
 from pykanban.models import Status
 from pykanban.store import BoardView
 from pykanban.ui.error_banner import ErrorBanner
@@ -26,6 +27,9 @@ from pykanban.ui.kanban_board import KanbanBoard
 from pykanban.ui.project_sidebar import ProjectSidebar
 from pykanban.ui.task_editor import TaskEditorPanel
 from pykanban.watcher import Watcher
+
+logger = get_logger(__name__)
+
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -131,6 +135,10 @@ class MainWindow(QMainWindow):
 
     def _initial_load(self) -> None:
         self.app.projects.startup_scan(self.app.state.settings.projects_dir)
+        logger.info(
+            "Startup scan complete: %d project(s) found",
+            len(self.app.state.projects.projects_by_id),
+        )
         self._watcher.set_projects(
             list(self.app.state.projects.projects_by_id.values()),
             self.app.state.settings.projects_dir,
@@ -146,6 +154,11 @@ class MainWindow(QMainWindow):
         """React to files modified or removed outside the app."""
         if not changed and not deleted:
             return
+        logger.info(
+            "External changes detected: %d changed, %d deleted",
+            len(changed),
+            len(deleted),
+        )
         try:
             self.app.apply_external_changes(changed, deleted)
         except KeyError:
@@ -154,7 +167,9 @@ class MainWindow(QMainWindow):
         self._refresh_from_state()
 
     def _on_project_folder_deleted(self, folder_path: Path) -> None:
+        logger.warning("Project folder deleted externally: %s", folder_path)
         self.app.handle_project_folder_deleted(folder_path)
+
         # clear from editor and refresh sidebar to clear stale
         self.editor.clear()
         self.sidebar.refresh(list(self.app.projects_list))
@@ -211,6 +226,8 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.No:
             return
 
+        logger.info("Deleting task id=%s title=%r", task_id, task.title)
+
         # clear the editor if it is showing the task being deleted
         if self.editor._task and self.editor._task.id == task_id:
             self.editor.clear()
@@ -243,6 +260,7 @@ class MainWindow(QMainWindow):
                 self.editor.discard()
             else:
                 self.editor.load_task(fresh_task)
+
         self.error_banner.set_errors(self.app.state.errors)
 
     def _delete_project(self, project_id: str) -> None:
@@ -269,9 +287,14 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        logger.warning(
+            "Deleting project id=%s title=%r", project_id, project.title
+        )
         # clear editor and board before mutating state
         self.editor.clear()
         self.app.delete_project(project_id)
+
+        logger.info("Project deleted successfully: id=%s", project_id)
 
         # refresh sidebar; board will show empty state if no project remains
         self.sidebar.refresh(list(self.app.projects_list))
@@ -293,9 +316,6 @@ class MainWindow(QMainWindow):
             project_id: ID of the project to archive.
         """
         project = self.app.get_project(project_id)
-        if project is None:
-            return
-
         reply = QMessageBox.question(
             self,
             "Archive project",
@@ -311,6 +331,10 @@ class MainWindow(QMainWindow):
         self.editor.clear()
         self.app.archive_project(project_id)
 
+        logger.info(
+            "Archived project id=%s title=%r", project_id, project.title
+        )
+
         # Sidebar refresh moves the item from active -> archived section
         self.sidebar.refresh(list(self.app.projects_list))
 
@@ -325,6 +349,7 @@ class MainWindow(QMainWindow):
     def _unarchive_project(self, project_id: str) -> None:
         """Unarchive the project and refresh the UI."""
         self.app.unarchive_project(project_id)
+        logger.info("Unarchived project id=%s", project_id)
         self.sidebar.refresh(list(self.app.projects_list))
         self._watcher.set_projects(
             list(self.app.state.projects.projects_by_id.values()),
@@ -340,6 +365,8 @@ class MainWindow(QMainWindow):
 
         # switch to the new project and refresh the board
         self.app.switch_project(project_id)
+
+        logger.info("Switched to project id=%s", project_id)
         self._watcher.set_projects(
             list(self.app.state.projects.projects_by_id.values()),
             self.app.state.settings.projects_dir,
@@ -359,6 +386,9 @@ class MainWindow(QMainWindow):
 
         # create the project
         project = self.app.projects.create_project(title.strip(), desc.strip())
+        logger.info(
+            "Created project id=%s title=%r", project.project_id, title.strip()
+        )
 
         # clear the editor and switch to the new project
         self.editor.clear()
@@ -380,16 +410,18 @@ class MainWindow(QMainWindow):
     def _rename_project(self, project_id: str) -> None:
         """Handle renaming a project from the sidebar."""
         project = self.app.get_project(project_id)
-        # TODO: is that code unreachable ?
-        if project is None:
-            return
-
         new_title, ok = QInputDialog.getText(
             self, "Rename Project", "New project title:", text=project.title
         )
         if not ok or not new_title.strip():
             return
 
+        logger.info(
+            "Renaming project id=%s: %r -> %r",
+            project_id,
+            project.title,
+            new_title,
+        )
         self.app.projects.rename_project(project_id, new_title.strip())
 
         # refresh the sidebar to show the updated title

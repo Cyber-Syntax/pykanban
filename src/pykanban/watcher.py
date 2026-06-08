@@ -117,7 +117,7 @@ class Watcher(QObject):
             # file system watch register failed, probably because
             # of system inotify limit has been reached
             logger.warning(
-                "Failed to register watches: %d diretor(ies), %d file(s)",
+                "Failed to register watches: %d diretor(ies), %d file(s)"
                 "falling back to polling mode every %d ms",
                 len(failed_dirs),
                 len(failed_files),

@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
 )
 
 from pykanban.config import Settings, save_settings
-from pykanban.logger import _LOG_FILE
+from pykanban.logger import _LOG_FILE, get_logger
+
+logger = get_logger(__name__)
 
 _LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
 
@@ -44,6 +46,7 @@ class SettingsDialog(QDialog):
 
         # default value (always shown, user can change)
         current = settings or Settings()
+        self.settings: Settings = current
 
         # Project directory
         self.projects_dir_edit = QLineEdit(str(current.projects_dir))
@@ -97,6 +100,10 @@ class SettingsDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
+        logger.debug(
+            "SettingsDialog opened with projects_dir=%s", current.projects_dir
+        )
+
     def select_projects_dir(self) -> None:
         """Open Folder picker."""
 
@@ -106,18 +113,19 @@ class SettingsDialog(QDialog):
         if directory:
             self.projects_dir_edit.setText(directory)
 
+        logger.info("Projects directory changed to: %s", directory)
+
     def _open_logs_folder(self) -> None:
         """Reveal the logs folder in the system file manager."""
         logs_dir = _LOG_FILE.parent
         logs_dir.mkdir(parents=True, exist_ok=True)
 
+        logger.debug("Opening logs folder: %s", logs_dir)
+
         if sys.platform == "linux":
             subprocess.Popen(["xdg-open", str(logs_dir)])
-        elif sys.platform == "darwin":
-            subprocess.Popen("open", str(logs_dir))
 
     # QDialog overrides
-
     def accept(self) -> None:
         """Save the settings and close the dialog."""
         settings = Settings(
@@ -128,6 +136,7 @@ class SettingsDialog(QDialog):
         save_settings(settings)
         self.settings = settings
         super().accept()
+        logger.info("Settings saved: %s", settings)
 
     def get_settings(self) -> Settings:
         """Return the selected settings."""
