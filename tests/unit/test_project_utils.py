@@ -178,8 +178,8 @@ class TestFindAllProjectConflicts:
         with TemporaryDirectory() as tmpdir:
             project = Mock(
                 spec=Project,
-                project_id="p_1",
                 folder_path=Path(tmpdir),
+                project_id="p_test",
             )
             projects_dict = {"p_1": project}
 
@@ -219,7 +219,9 @@ class TestLoadProjectTasks:
     def test_empty_project_folder(self):
         """Should return empty result for project with no task files."""
         with TemporaryDirectory() as tmpdir:
-            project = Mock(spec=Project, folder_path=Path(tmpdir))
+            project = Mock(
+                spec=Project, folder_path=Path(tmpdir), project_id="p_1"
+            )
 
             result = load_project_tasks(project)
 
@@ -234,9 +236,9 @@ class TestLoadProjectTasks:
             task_file = folder / "task.md"
             task_file.write_text("# Task")
 
-            project = Mock(spec=Project, folder_path=folder)
+            project = Mock(spec=Project, folder_path=folder, project_id="p_1")
 
-            with patch("pykanban.parser.parse_task") as mock_parse_task:
+            with patch("pykanban.project_utils.parse_task") as mock_parse_task:
                 task = Mock(spec=Task, id="task_123")
                 mock_parse_task.return_value = task
 
@@ -252,9 +254,9 @@ class TestLoadProjectTasks:
             bad_file = folder / "bad.md"
             bad_file.write_text("content")
 
-            project = Mock(spec=Project, folder_path=folder)
+            project = Mock(spec=Project, folder_path=folder, project_id="p_1")
 
-            with patch("pykanban.parser.parse_task") as mock_parse_task:
+            with patch("pykanban.project_utils.parse_task") as mock_parse_task:
                 error = ParseError(path=bad_file, reason="Invalid YAML")
                 mock_parse_task.return_value = error
 
@@ -272,9 +274,9 @@ class TestLoadProjectTasks:
             file1.write_text("# Task 1")
             file2.write_text("# Task 2")
 
-            project = Mock(spec=Project, folder_path=folder)
+            project = Mock(spec=Project, folder_path=folder, project_id="p_1")
 
-            with patch("pykanban.parser.parse_task") as mock_parse_task:
+            with patch("pykanban.project_utils.parse_task") as mock_parse_task:
                 task1 = Mock(spec=Task, id="t_001")
                 task2 = Mock(spec=Task, id="t_002")
                 mock_parse_task.side_effect = [task1, task2]
@@ -291,9 +293,9 @@ class TestLoadProjectTasks:
             task_file.write_text("# Task")
 
             existing_cache = {Path("/some/other/file.md"): 1234.5}
-            project = Mock(spec=Project, folder_path=folder)
+            project = Mock(spec=Project, folder_path=folder, project_id="p_1")
 
-            with patch("pykanban.parser.parse_task") as mock_parse_task:
+            with patch("pykanban.project_utils.parse_task") as mock_parse_task:
                 task = Mock(spec=Task, id="t_123")
                 mock_parse_task.return_value = task
 
@@ -306,26 +308,23 @@ class TestLoadProjectTasks:
 
     def test_handles_mtime_read_errors_gracefully(self):
         """Should skip files that disappear during stat call."""
-        with TemporaryDirectory() as tmpdir:
-            folder = Path(tmpdir)
-            task_file = folder / "task.md"
-            task_file.write_text("# Task")
+        mock_file = Mock(spec=Path)
+        mock_file.stat.side_effect = OSError("File not found")
 
-            project = Mock(spec=Project, folder_path=folder)
+        mock_folder = Mock(spec=Path)
+        mock_folder.rglob.return_value = [mock_file]
 
-            with patch("pykanban.parser.parse_task") as mock_parse_task:
-                task = Mock(spec=Task, id="t_123")
-                mock_parse_task.return_value = task
+        project = Mock(spec=Project, folder_path=mock_folder, project_id="p_1")
 
-                # Mock stat to raise OSError (file disappeared)
-                with patch.object(
-                    Path, "stat", side_effect=OSError("File not found")
-                ):
-                    result = load_project_tasks(project)
+        with patch("pykanban.project_utils.parse_task") as mock_parse_task:
+            task = Mock(spec=Task, id="t_123")
+            mock_parse_task.return_value = task
 
-                    # Should still load the task, just without mtime
-                    assert result.loaded_task_ids == {"t_123"}
-                    assert task_file not in result.updated_mtime_cache
+            result = load_project_tasks(project)
+
+            # Should still load the task, just without mtime
+            assert result.loaded_task_ids == {"t_123"}
+            assert mock_file not in result.updated_mtime_cache
 
 
 class TestReconcileOrder:
