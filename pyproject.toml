@@ -1,6 +1,6 @@
 [project]
 name = "pykanban"
-version = "0.1.0"
+version = "0.1.0-alpha"
 description = "PyKanban is a Kanban board application that uses markdown files for task management."
 readme = "README.md"
 authors = [
