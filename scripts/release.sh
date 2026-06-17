@@ -2,9 +2,8 @@
 set -euo pipefail
 
 APP_NAME="PyKanban"
-CHANGELOG_SCRIPT="./extract_changelog.sh"
-
-DEFAULT_APPIMAGE="../PyKanban-x86_64.AppImage"
+CHANGELOG_SCRIPT="./scripts/extract_changelog.sh"
+DEFAULT_APPIMAGE="./PyKanban-x86_64.AppImage"
 
 trap 'printf "❌ Interrupted release pipeline\n" >&2' INT TERM
 
@@ -30,7 +29,7 @@ extract_release_data() {
 }
 
 git_tag_release() {
-  local tag="$VERSION"
+  local tag="v${VERSION}"
 
   if git rev-parse "$tag" >/dev/null 2>&1; then
     printf "⚠️ Tag already exists: %s\n" "$tag" >&2
@@ -38,14 +37,10 @@ git_tag_release() {
   fi
 
   git tag -a "$tag" -m "$tag"
-  git push origin "$tag"
-
+  git push origin HEAD --tags
   return 0
 }
 
-# ----------------------------------------------------------------------
-# rename the AppImage and create a .sha256 checksum file
-# ----------------------------------------------------------------------
 rename_and_checksum_appimage() {
   local version="$1"
   local appimage_file="${2:-$DEFAULT_APPIMAGE}"
@@ -56,28 +51,24 @@ rename_and_checksum_appimage() {
   fi
 
   local new_name="PyKanban-${version}-x86_64.AppImage"
-  mv "$appimage_file" "$new_name"
-  printf "📦 Renamed AppImage to %s\n" "$new_name"
 
-  # Create checksum in the standard sha256sum format
-  sha256sum "$new_name" >"${new_name}.sha256"
-  printf "🔒 Checksum saved to %s\n" "${new_name}.sha256"
+  mv "$appimage_file" "./$new_name"
+  printf "📦 Renamed AppImage to ./%s\n" "$new_name" >&2
 
-  # Return the new filename so later steps can use it
-  echo "$new_name"
+  sha256sum "./$new_name" >"./${new_name}.sha256"
+  printf "🔒 Checksum saved to ./%s\n" "${new_name}.sha256" >&2
+
+  echo "./$new_name"
 }
 
-# ----------------------------------------------------------------------
-# uses a temporary file for notes to avoid shell metacharacter issues
-# and attaches the AppImage + checksum as release assets.
-# ----------------------------------------------------------------------
 create_github_release() {
   local version="$1"
   local notes="$2"
   shift 2
   local assets=("$@")
 
-  printf "🚀 Creating GitHub release %s...\n" "$version"
+  local release_tag="v${version}"
+  printf "🚀 Creating GitHub release %s...\n" "$release_tag" >&2
 
   local notes_file
   notes_file=$(mktemp)
@@ -89,36 +80,32 @@ create_github_release() {
   fi
 
   local rc=0
-  gh release create "$version" \
-    --title "$APP_NAME-$version" \
+  gh release create "$release_tag" \
+    --title "$APP_NAME-$release_tag" \
     --notes-file "$notes_file" \
     $prerelease_flag \
     "${assets[@]}" || rc=$?
 
-  rm -f "$notes_file" # ← clean up immediately, even on failure
+  rm -f "$notes_file"
   return $rc
 }
 
 main() {
-  printf "🚀 Starting release pipeline...\n"
+  printf "🚀 Starting release pipeline...\n" >&2
 
-  # 1. Get version and notes from CHANGELOG.md
   extract_release_data || return 1
 
-  printf "📦 Version: %s\n" "$VERSION"
-  printf "📝 Notes extracted\n"
+  printf "📦 Version: %s\n" "$VERSION" >&2
+  printf "📝 Notes extracted\n" >&2
 
-  # 2. Rename the built AppImage and create the checksum file
   local appimage_path
   appimage_path=$(rename_and_checksum_appimage "$VERSION") || return 1
 
-  # 3. Tag the release in git
   git_tag_release || return 1
 
-  # 4. Create GitHub release with the AppImage, checksum, and notes
   create_github_release "$VERSION" "$NOTES" "$appimage_path" "${appimage_path}.sha256"
 
-  printf "✅ Release completed successfully!\n"
+  printf "✅ Release completed successfully!\n" >&2
   return 0
 }
 

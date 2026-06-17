@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CHANGELOG_FILE="${1:-../CHANGELOG.md}"
+CHANGELOG_FILE="${1:-./CHANGELOG.md}"
 
 main() {
   local first_header version notes
