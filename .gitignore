@@ -1,3 +1,7 @@
+# appimage builds
+*.AppImage
+AppDir/
+
 # Specific files
 .copilot-tracking
 test_github_release_desc.md
