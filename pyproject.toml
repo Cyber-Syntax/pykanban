@@ -1,6 +1,6 @@
 [project]
 name = "pykanban"
-version = "0.1.0"
+version = "0.1.0-alpha"
 description = "PyKanban is a Kanban board application that uses markdown files for task management."
 readme = "README.md"
 authors = [
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-pykanban = "pykanban:main"
+pykanban = "pykanban.main:main"
 
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12.0"]
@@ -32,6 +32,8 @@ dev = [
   "pytest-env>=1.4.0",
   "memray>=1.19.3",
   "hypothesis>=6.153.0",
+  "nuitka>=4.1.2",
+  "patchelf>=0.17.2.4",
 ]
 lint = ["ruff>=0.15.14"]
 
