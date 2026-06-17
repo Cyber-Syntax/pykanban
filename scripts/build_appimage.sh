@@ -45,6 +45,6 @@ chmod +x "$APPDIR/AppRun"
 # 5. build AppImage
 # ------------------------
 echo "📦 Building AppImage..."
-./appimagetool-x86_64.AppImage "$APPDIR"
+./appimagetool-x86_64.AppImage "$APPDIR" "build/PyKanban-x86_64.AppImage"
 
-echo "✅ Done!"
+echo "✅ AppImage saved to build/PyKanban-x86_64.AppImage"

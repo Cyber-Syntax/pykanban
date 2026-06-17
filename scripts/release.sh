@@ -3,7 +3,8 @@ set -euo pipefail
 
 APP_NAME="PyKanban"
 CHANGELOG_SCRIPT="./scripts/extract_changelog.sh"
-DEFAULT_APPIMAGE="./PyKanban-x86_64.AppImage"
+BUILD_DIR="${BUILD_DIR:-./build}"
+DEFAULT_APPIMAGE="${BUILD_DIR}/PyKanban-x86_64.AppImage"
 
 trap 'printf "❌ Interrupted release pipeline\n" >&2' INT TERM
 
@@ -51,14 +52,15 @@ rename_and_checksum_appimage() {
   fi
 
   local new_name="PyKanban-${version}-x86_64.AppImage"
+  local dest="${BUILD_DIR}/${new_name}"
 
-  mv "$appimage_file" "./$new_name"
-  printf "📦 Renamed AppImage to ./%s\n" "$new_name" >&2
+  cp "$appimage_file" "$dest"
+  printf "📦 Copied AppImage to %s\n" "$dest" >&2
 
-  sha256sum "./$new_name" >"./${new_name}.sha256"
-  printf "🔒 Checksum saved to ./%s\n" "${new_name}.sha256" >&2
+  sha256sum "$dest" >"${dest}.sha256"
+  printf "🔒 Checksum saved to %s\n" "${dest}.sha256" >&2
 
-  echo "./$new_name"
+  echo "$dest"
 }
 
 create_github_release() {
