@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1-alpha]
+
+### Changed
+
+- Changed appimage build script to use nuitka instead of pyside6-deploy which that was also using nuitka under the hood.
+
+### Fixed
+
+- Included learn-pykanban project to builded appimage.
+
 ## [0.1.0-alpha] - 2026-06-17
 
 ### Added
