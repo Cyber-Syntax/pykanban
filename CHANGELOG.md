@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.1-alpha]
 
+### Changed
+
+- Changed appimage build script to use nuitka instead of pyside6-deploy which that was also using nuitka under the hood.
+
 ### Fixed
 
 - Included learn-pykanban project to builded appimage.

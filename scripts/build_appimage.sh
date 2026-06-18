@@ -3,7 +3,6 @@ set -e
 
 APP_NAME="pykanban"
 PROJECT_DIR="/home/developer/Documents/repositories/my-repos/pykanban/src/pykanban"
-SPEC="packaging/pysidedeploy.spec"
 BIN_PATH="build/pykanban.bin"
 APPDIR="AppDir"
 
@@ -13,7 +12,6 @@ APPDIR="AppDir"
 mkdir -p build
 
 echo "🔧 Building PySide6 app..."
-# uv run pyside6-deploy --config-file "$SPEC"
 if uv run python -m nuitka \
   --onefile \
   --enable-plugin=pyside6 \
