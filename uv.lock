@@ -345,7 +345,7 @@ wheels = [
 
 [[package]]
 name = "pykanban"
-version = "0.1.0a0"
+version = "0.1.1a0"
 source = { editable = "." }
 dependencies = [
     { name = "markdown-it-py" },

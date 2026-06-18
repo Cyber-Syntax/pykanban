@@ -43,7 +43,10 @@ def bootstrap_settings() -> tuple[Settings, bool]:
         except ConfigError as e:
             # show a modal error dialog before exiting:
             QMessageBox.critical(
-                None, "Configuration Error", str(e), QMessageBox.Ok
+                None,
+                "Configuration Error",
+                str(e),
+                QMessageBox.StandardButton.Ok,
             )
             sys.exit(1)
 
